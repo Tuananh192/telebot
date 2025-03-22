@@ -1,4 +1,4 @@
 python-telegram-bot
-flask
-nest_asyncio
+aiohttp
+asyncio
 
