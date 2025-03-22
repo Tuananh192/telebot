@@ -286,10 +286,6 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Hàm chạy Telegram Bot
 def run_telegram_bot():
-    # Tạo event loop mới
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
     # Khởi tạo bot Telegram
     application = Application.builder().token("6373184346:AAFkcpWzQWiIbjUeFH5iwtIxWRYItCdi-aM").build()
 
@@ -301,23 +297,18 @@ def run_telegram_bot():
     # Chạy bot
     application.run_polling()
 
-# Hàm chạy FlaskS
+# Hàm chạy Flask
 def run_flask():
     app.run(host="0.0.0.0", port=5000)
 
 # Hàm chính để chạy cả Flask và Telegram Bot
 def main():
-    # Tạo luồng cho Flask
+    # Tạo và chạy thread cho Flask
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.start()
 
-    # Tạo luồng cho Telegram Bot
-    telegram_thread = threading.Thread(target=run_telegram_bot)
-    telegram_thread.start()
-
-    # Chờ cả hai luồng kết thúc
-    flask_thread.join()
-    telegram_thread.join()
+    # Chạy Telegram Bot trong thread chính
+    run_telegram_bot()
 
 if __name__ == "__main__":
     main()
