@@ -10,7 +10,7 @@ import dropbox
 from telebot.formatting import escape_markdown  # Import hàm escape_markdown
 
 # ✅ Cấu hình bot
-TOKEN = "7815604030:AAELtDIikq3XylIwzwITArq-kjrFP6EFwsM"
+TOKEN = "7815604030AAELtDIikq3XylIwzwITArq-kjrFP6EFwsM"
 ADMIN_ID = 6283529520  # Thay bằng Telegram ID của admin
 
 bot = telebot.TeleBot(TOKEN)
