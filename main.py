@@ -135,11 +135,11 @@ except Exception as e:
     logger.error(f"Lỗi khi kiểm tra/tạo bảng: {str(e)}")
     raise
 
-# Hàm gửi tin nhắn với retry
-def send_message_with_retry(bot, chat_id, text, retries=5, delay=2):
+# Hàm gửi tin nhắn với retry, hỗ trợ parse_mode
+def send_message_with_retry(bot, chat_id, text, retries=5, delay=2, parse_mode=None):
     for attempt in range(retries):
         try:
-            bot.send_message(chat_id, text, timeout=30)
+            bot.send_message(chat_id, text, timeout=30, parse_mode=parse_mode)
             logger.info(f"Đã gửi tin nhắn đến {chat_id}")
             return
         except Exception as e:
