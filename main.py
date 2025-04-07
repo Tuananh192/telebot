@@ -21,8 +21,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Cấu hình bot
-TOKEN = "7815604030:AAHAIXwBX6mLA2eQGH6xKEFadaC4fYU9dqs"  # Thay bằng token của bạn
-ADMIN_ID = 1615483759  # Thay bằng Telegram ID của admin
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "7815604030:AAGXHEEN8DN00ohIStbLR5oFVUv2qEGMXx8")  # Lấy token từ biến môi trường
+ADMIN_ID = 6283529520  # Thay bằng Telegram ID của admin
 
 # Tạo session với retry
 session = requests.Session()
@@ -63,7 +63,7 @@ def upload_to_cloudinary(local_file_path, cloudinary_path):
 def download_from_cloudinary(cloudinary_path, local_file_path):
     try:
         url = cloudinary.api.resource(cloudinary_path, resource_type="raw")["url"]
-        response = session.get(url, timeout=30)
+        response = session.get(url, timeout=60)  # Tăng timeout lên 60 giây
         with open(local_file_path, "wb") as f:
             f.write(response.content)
         logger.info(f"Đã tải {cloudinary_path} từ Cloudinary về {local_file_path}")
@@ -139,7 +139,7 @@ except Exception as e:
 def send_message_with_retry(bot, chat_id, text, retries=5, delay=2, parse_mode=None):
     for attempt in range(retries):
         try:
-            bot.send_message(chat_id, text, timeout=30, parse_mode=parse_mode)
+            bot.send_message(chat_id, text, timeout=60, parse_mode=parse_mode)  # Tăng timeout lên 60 giây
             logger.info(f"Đã gửi tin nhắn đến {chat_id}")
             return
         except Exception as e:
@@ -427,7 +427,7 @@ def mua_link_step2(message):
             return
 
     update_balance(user_id, -price)
-    time.sleep(0.1)  # Độ trễ để tránh giới hạn tốc độ
+    time.sleep(1)  # Tăng độ trễ lên 1 giây để tránh giới hạn
     send_message_with_retry(bot, message.chat.id, 
         f"🎉 Mua thành công!\n"
         f"🔗 Link: {original_link}\n"
@@ -646,7 +646,7 @@ def process_announcement(message):
         try:
             send_message_with_retry(bot, user_id, f"📢 *Thông báo từ BIGCHANG:*\n{content}", parse_mode="Markdown")
             success_count += 1
-            time.sleep(0.05)
+            time.sleep(1)  # Tăng độ trễ lên 1 giây để tránh giới hạn
         except:
             pass
     send_message_with_retry(bot, ADMIN_ID, f"✅ Đã gửi thông báo đến {success_count} người dùng.")
@@ -662,7 +662,7 @@ if __name__ == "__main__":
     keep_alive()
     while True:
         try:
-            bot.polling(none_stop=True, interval=0, timeout=60)
+            bot.polling(none_stop=True, interval=0, timeout=60)  # Tăng timeout lên 60 giây
         except Exception as e:
             logger.error(f"Lỗi polling: {str(e)}")
             time.sleep(5)  # Chờ 5 giây trước khi thử lại
