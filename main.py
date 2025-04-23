@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Cấu hình bot
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "7815604030:AAFc_FUxDXe6kKdgFrmbICQzkhy2-FN-tL0")  # Lấy token từ biến môi trường
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "7815604030:AAHaICTi7TeR-B92O3TQyrdVCBHmbIhQ-Cc")  # Lấy token từ biến môi trường
 ADMIN_ID = 6283529520  # Thay bằng Telegram ID của admin
 
 # Tạo session với retry
