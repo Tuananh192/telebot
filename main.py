@@ -21,7 +21,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 # Cấu hình bot
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "7815604030:AAES60PXCgAx6Fm36KmGZks3BxF2RtzGCeM")  # Lấy token từ biến môi trường
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "7815604030:AAFY53RSYvhU5jVZtzIlqnmwM_XYdagJv1s")  # Lấy token từ biến môi trường
 ADMIN_ID = 6283529520  # Thay bằng Telegram ID của admin
 
 # Tạo session với retry
@@ -265,7 +265,7 @@ def check_vip(message):
 @bot.message_handler(commands=["buy_vip"])
 def buy_vip(message):
     user_id = message.chat.id
-    vip_price = 59000
+    vip_price = 39000
     balance = get_balance(user_id)
 
     if is_vip(user_id):
