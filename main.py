@@ -265,7 +265,7 @@ def check_vip(message):
 @bot.message_handler(commands=["buy_vip"])
 def buy_vip(message):
     user_id = message.chat.id
-    vip_price = 39000
+    vip_price = 59000
     balance = get_balance(user_id)
 
     if is_vip(user_id):
