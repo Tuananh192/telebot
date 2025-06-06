@@ -36,24 +36,16 @@ def _install_():
         print(
             f"{Fore.YELLOW}[!] Bạn chưa có thư viện: {Fore.RED}{', '.join(_pkgs)}{Style.RESET_ALL}")
         print(f"{Fore.CYAN}{'=' * 50}{Style.RESET_ALL}")
-        install=input(
-            f"{Fore.GREEN}[?] Bạn có muốn cài đặt thư viện này không? (y/n): {Style.RESET_ALL}")
-        if install.lower() == 'y':
-            print(f"{Fore.BLUE}[*] Đang cài đặt thư viện...{Style.RESET_ALL}")
-            try:
-                subprocess.check_call(
-                    [sys.executable, '-m', 'pip', 'install', *_pkgs])
-                print(f"{Fore.GREEN}[✓] Cài đặt thành công!{Style.RESET_ALL}")
-            except subprocess.CalledProcessError:
-                print(
-                    f"{Fore.RED}[✗] Lỗi cài đặt, hãy thử cài tay bằng lệnh sau:{Style.RESET_ALL}")
-                print(f"{Fore.YELLOW}pip install {' '.join(_pkgs)}{Style.RESET_ALL}")
-                input("Nhấn Enter để thoát...")
-                sys.exit(1)
-        else:
+        
+        print(f"{Fore.BLUE}[*] Đang cài đặt thư viện...{Style.RESET_ALL}")
+        try:
+            subprocess.check_call(
+                [sys.executable, '-m', 'pip', 'install', *_pkgs])
+            print(f"{Fore.GREEN}[✓] Cài đặt thành công!{Style.RESET_ALL}")
+        except subprocess.CalledProcessError:
             print(
-                f"{Fore.YELLOW}[!] Cần có thư viện để tool hoạt động, cài bằng lệnh:{Style.RESET_ALL}")
-            print(f"{Fore.GREEN}pip install {' '.join(_pkgs)}{Style.RESET_ALL}")
+                f"{Fore.RED}[✗] Lỗi cài đặt, hãy thử cài tay bằng lệnh sau:{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}pip install {' '.join(_pkgs)}{Style.RESET_ALL}")
             input("Nhấn Enter để thoát...")
             sys.exit(1)
 _install_()
