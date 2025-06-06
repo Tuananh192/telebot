@@ -1,668 +1,1091 @@
+#!/usr/bin/env python
+# coding: utf-8
+# Telegram: @wus_team
+# Version: 1.0.7 (Telegram Bot)
+# Github: https://github.com/wusthanhdieu
+# Description: zLocket Tool Open Source - Telegram Bot Version
+
+import sys
+import subprocess
+def _install_():
+    try:
+        from colorama import Fore, Style, init
+        init()
+    except ImportError:
+        class DummyColors:
+            def __getattr__(self, name):
+                return ''
+        Fore=Style=DummyColors()
+    def itls(pkg):
+        try:
+            __import__(pkg)
+            return True
+        except ImportError:
+            return False
+    _list_={
+        'requests': 'requests',
+        'tqdm': 'tqdm',
+        'colorama': 'colorama',
+        'pystyle': 'pystyle',
+        'urllib3': 'urllib3',
+        'telebot': 'pyTelegramBotAPI',
+    }
+    _pkgs=[pkg_name for pkg_name in _list_ if not itls(pkg_name)]
+    if _pkgs:
+        print(f"{Fore.CYAN}{'=' * 50}{Style.RESET_ALL}")
+        print(
+            f"{Fore.YELLOW}[!] Bạn chưa có thư viện: {Fore.RED}{', '.join(_pkgs)}{Style.RESET_ALL}")
+        print(f"{Fore.CYAN}{'=' * 50}{Style.RESET_ALL}")
+        install=input(
+            f"{Fore.GREEN}[?] Bạn có muốn cài đặt thư viện này không? (y/n): {Style.RESET_ALL}")
+        if install.lower() == 'y':
+            print(f"{Fore.BLUE}[*] Đang cài đặt thư viện...{Style.RESET_ALL}")
+            try:
+                subprocess.check_call(
+                    [sys.executable, '-m', 'pip', 'install', *_pkgs])
+                print(f"{Fore.GREEN}[✓] Cài đặt thành công!{Style.RESET_ALL}")
+            except subprocess.CalledProcessError:
+                print(
+                    f"{Fore.RED}[✗] Lỗi cài đặt, hãy thử cài tay bằng lệnh sau:{Style.RESET_ALL}")
+                print(f"{Fore.YELLOW}pip install {' '.join(_pkgs)}{Style.RESET_ALL}")
+                input("Nhấn Enter để thoát...")
+                sys.exit(1)
+        else:
+            print(
+                f"{Fore.YELLOW}[!] Cần có thư viện để tool hoạt động, cài bằng lệnh:{Style.RESET_ALL}")
+            print(f"{Fore.GREEN}pip install {' '.join(_pkgs)}{Style.RESET_ALL}")
+            input("Nhấn Enter để thoát...")
+            sys.exit(1)
+_install_()
+
+import os, re, time, json, queue, string, random, threading, datetime
+from queue import Queue
+from itertools import cycle
+from urllib.parse import urlparse, parse_qs, urlencode
+import requests, urllib3
+from requests.exceptions import ProxyError
+from colorama import init, Back, Style
+from typing import Optional, List
 import telebot
-import sqlite3
-from telebot.types import ForceReply
-from flask import Flask
-from threading import Thread
-import cloudinary
-import cloudinary.uploader
-import cloudinary.api
-from telebot.formatting import escape_markdown
-import time
-import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-from datetime import datetime, timedelta
-import io
-import os
-import logging
+from telebot import types
 
-# Cấu hình logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+PRINT_LOCK=threading.RLock()
+def sfprint(*args, **kwargs):
+    with PRINT_LOCK:
+        print(*args, **kwargs)
+        sys.stdout.flush()
 
-# Cấu hình bot
-TOKEN = os.environ.get("TELEGRAM_TOKEN", "7815604030:AAHL1vq1d_SpLHbZtyG2D-HanZfJXuu2Bho")  # Lấy token từ biến môi trường
-ADMIN_ID = 6283529520  # Thay bằng Telegram ID của admin
+class xColor:
+    YELLOW='\033[38;2;255;223;15m'
+    GREEN='\033[38;2;0;209;35m'
+    RED='\033[38;2;255;0;0m'
+    BLUE='\033[38;2;0;132;255m'
+    PURPLE='\033[38;2;170;0;255m'
+    PINK='\033[38;2;255;0;170m'
+    MAGENTA='\033[38;2;255;0;255m'
+    ORANGE='\033[38;2;255;132;0m'
+    CYAN='\033[38;2;0;255;255m'
+    PASTEL_YELLOW='\033[38;2;255;255;153m'
+    PASTEL_GREEN='\033[38;2;153;255;153m'
+    PASTEL_BLUE='\033[38;2;153;204;255m'
+    PASTEL_PINK='\033[38;2;255;153;204m'
+    PASTEL_PURPLE='\033[38;2;204;153;255m'
+    DARK_RED='\033[38;2;139;0;0m'
+    DARK_GREEN='\033[38;2;0;100;0m'
+    DARK_BLUE='\033[38;2;0;0;139m'
+    DARK_PURPLE='\033[38;2;75;0;130m'
+    GOLD='\033[38;2;255;215;0m'
+    SILVER='\033[38;2;192;192;192m'
+    BRONZE='\033[38;2;205;127;50m'
+    NEON_GREEN='\033[38;2;57;255;20m'
+    NEON_PINK='\033[38;2;255;20;147m'
+    NEON_BLUE='\033[38;2;31;81;255m'
+    WHITE='\033[38;2;255;255;255m'
+    RESET='\033[0m'
 
-# Tạo session với retry
-session = requests.Session()
-retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
-session.mount("https://", HTTPAdapter(max_retries=retries))
+# Global variables for Telegram Bot
+bot = None
+tool_running = False
+tool_thread = None
+stop_event = None
+config = None
 
-bot = telebot.TeleBot(TOKEN, threaded=True)
+class zLocket:
+    def __init__(self, device_token: str="", target_friend_uid: str="", num_threads: int=1, note_target: str=""):
+        self.FIREBASE_GMPID="1:641029076083:ios:cc8eb46290d69b234fa606"
+        self.IOS_BUNDLE_ID="com.locket.Locket"
+        self.API_BASE_URL="https://api.locketcamera.com"
+        self.FIREBASE_AUTH_URL="https://www.googleapis.com/identitytoolkit/v3/relyingparty"
+        self.FIREBASE_API_KEY="AIzaSyCQngaaXQIfJaH0aS2l7REgIjD7nL431So"
+        self.TOKEN_API_URL="https://thanhdieu.com/api/v1/locket/token"
+        self.SHORT_URL="https://url.thanhdieu.com/api/v1"
+        self.TOKEN_FILE_PATH="token.json"
+        self.TOKEN_EXPIRY_TIME=(20 + 10) * 60
+        self.FIREBASE_APP_CHECK=None
+        self.USE_EMOJI=True
+        self.ACCOUNTS_PER_PROXY=random.randint(6,10)
+        self.NAME_TOOL="zLocket Tool Pro"
+        self.VERSION_TOOL="v1.0.7"
+        self.TARGET_FRIEND_UID=target_friend_uid if target_friend_uid else None
+        self.PROXY_LIST=[
+            # 'https://thanhdieu.com/api/list/free-proxy.txt',
+        ]
+        self.print_lock=threading.Lock()
+        self.successful_requests=0
+        self.failed_requests=0
+        self.total_proxies=0
+        self.start_time=time.time()
+        self.spam_confirmed=False
+        self.telegram='wus_team'
+        self.author='WsThanhDieu'
+        self.messages=[]
+        self.request_timeout=15
+        self.device_token=device_token
+        self.num_threads=num_threads
+        self.note_target=note_target
+        self.session_id=int(time.time() * 1000)
+        self._init_environment()
+        self.FIREBASE_APP_CHECK=self._load_token_()
+        if os.name == "nt":
+            os.system(
+                f"title 💰 {self.NAME_TOOL} {self.VERSION_TOOL} by Api.ThanhDieu.Com 💰"
+         )
 
-# Cấu hình Cloudinary
-cloudinary.config(
-    cloud_name="dwwm2nkt4",
-    api_key="339732977831829",
-    api_secret="4YAAnZVCh4mKevUtS8fsqpr2p-k"
-)
+    def _print(self, *args, **kwargs):
+        with PRINT_LOCK:
+            timestamp=datetime.datetime.now().strftime("%H:%M:%S")
+            message=" ".join(map(str, args))
+            sm=message
+            if "[+]" in message:
+                sm=f"{xColor.GREEN}{Style.BRIGHT}{message}{Style.RESET_ALL}"
+            elif "[✗]" in message:
+                sm=f"{xColor.RED}{Style.BRIGHT}{message}{Style.RESET_ALL}"
+            elif "[!]" in message:
+                sm=f"{xColor.YELLOW}{Style.BRIGHT}{message}{Style.RESET_ALL}"
+            sfprint(
+                f"{xColor.CYAN}[{timestamp}]{Style.RESET_ALL} {sm}", **kwargs)
 
-# Tạo Flask app để giữ bot chạy
-app = Flask(__name__)
+    def _loader_(self, message, duration=3):
+        spinner=cycle(['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'])
+        end_time=time.time() + duration
+        while time.time() < end_time:
+            with PRINT_LOCK:
+                sys.stdout.write(f"\r{xColor.CYAN}{message} {next(spinner)} ")
+                sys.stdout.flush()
+            time.sleep(0.1)
+        with PRINT_LOCK:
+            sys.stdout.write(f"\r{xColor.GREEN}{message} ✓     \n")
+            sys.stdout.flush()
 
-@app.route('/')
-def home():
-    return "Bot is running!"
+    def _sequence_(self, message, duration=1.5, char_set="0123456789ABCDEF"):
+        end_time = time.time() + duration
+        while time.time() < end_time:
+            random_hex = ''.join(random.choices(char_set, k=50))
+            with PRINT_LOCK:
+                sys.stdout.write(f"\r{xColor.GREEN}[{xColor.WHITE}*{xColor.GREEN}] {xColor.CYAN}{message}: {xColor.GREEN}{random_hex}")
+                sys.stdout.flush()
+            time.sleep(0.05)
+        with PRINT_LOCK:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
 
-def run():
-    app.run(host="0.0.0.0", port=8080)
+    def _randchar_(self, duration=2):
+        special_chars="#$%^&*()[]{}!@<>?/\\|~`-=+_"
+        hex_chars="0123456789ABCDEF"
+        colors=[xColor.GREEN, xColor.RED, xColor.YELLOW,
+                  xColor.CYAN, xColor.MAGENTA, xColor.NEON_GREEN]
+        end_time=time.time() + duration
+        while time.time() < end_time:
+            length=random.randint(20, 40)
+            vtd=""
+            for _ in range(length):
+                char_type=random.randint(1, 3)
+                if char_type == 1:
+                    vtd+=random.choice(special_chars)
+                elif char_type == 2:
+                    vtd+=random.choice(hex_chars)
+                else:
+                    vtd+=random.choice("xX0")
+            status=random.choice([
+                f"{xColor.GREEN}[ACCESS]",
+                f"{xColor.RED}[DENIED]",
+                f"{xColor.YELLOW}[BREACH]",
+                f"{xColor.CYAN}[DECODE]",
+                f"{xColor.MAGENTA}[ENCRYPT]"
+            ])
+            color=random.choice(colors)
+            with PRINT_LOCK:
+                sys.stdout.write(
+                    f"\r{xColor.CYAN}[RUNNING TOOL] {color}{vtd} {status}")
+                sys.stdout.flush()
+            time.sleep(0.1)
+        with PRINT_LOCK:
+            print()
 
-def upload_to_cloudinary(local_file_path, cloudinary_path):
-    try:
-        response = cloudinary.uploader.upload(
-            local_file_path,
-            public_id=cloudinary_path,
-            resource_type="raw",
-            overwrite=True
-        )
-        logger.info(f"Đã upload {local_file_path} lên Cloudinary tại {cloudinary_path}")
-    except Exception as e:
-        logger.error(f"Lỗi khi upload lên Cloudinary: {str(e)}")
+    def _blinking_(self, text, blinks=3, delay=0.1):
+        for _ in range(blinks):
+            with PRINT_LOCK:
+                sys.stdout.write(f"\r{xColor.WHITE}{text}")
+                sys.stdout.flush()
+            time.sleep(delay)
+            with PRINT_LOCK:
+                sys.stdout.write(f"\r{' ' * len(text)}")
+                sys.stdout.flush()
+            time.sleep(delay)
+        with PRINT_LOCK:
+            sys.stdout.write(f"\r{xColor.GREEN}{text}\n")
+            sys.stdout.flush()
 
-def download_from_cloudinary(cloudinary_path, local_file_path):
-    try:
-        url = cloudinary.api.resource(cloudinary_path, resource_type="raw")["url"]
-        response = session.get(url, timeout=60)  # Tăng timeout lên 60 giây
-        with open(local_file_path, "wb") as f:
-            f.write(response.content)
-        logger.info(f"Đã tải {cloudinary_path} từ Cloudinary về {local_file_path}")
-        return True
-    except Exception as e:
-        logger.error(f"Lỗi khi tải từ Cloudinary: {str(e)}")
-        return False
+    def _init_environment(self):
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        init(autoreset=True)
 
-# Khởi tạo database
-logger.info("Khởi tạo database...")
-if not os.path.exists("database.db"):
-    logger.info("File database.db không tồn tại, đang tạo file cục bộ...")
-    open("database.db", "a").close()
-    logger.info("Đã tạo file database.db cục bộ")
-
-logger.info("Đang tải database từ Cloudinary...")
-success = download_from_cloudinary("database.db", "database.db")
-
-try:
-    conn = sqlite3.connect("database.db", check_same_thread=False)
-    cursor = conn.cursor()
-    logger.info("Kết nối database thành công")
-except Exception as e:
-    logger.error(f"Lỗi khi kết nối database: {str(e)}")
-    raise
-
-# Kiểm tra và tạo bảng
-try:
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-    if cursor.fetchone() is None:
-        cursor.execute('''
-            CREATE TABLE users (
-                user_id INTEGER PRIMARY KEY,
-                balance REAL DEFAULT 0,
-                last_bill TEXT,
-                vip_expiry DATETIME
-            )
-        ''')
-        logger.info("Đã tạo bảng users")
-
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='links'")
-    if cursor.fetchone() is None:
-        cursor.execute('''
-            CREATE TABLE links (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                bypass_link TEXT UNIQUE,
-                original_link TEXT,
-                price REAL,
-                vip_only INTEGER DEFAULT 0
-            )
-        ''')
-        logger.info("Đã tạo bảng links với cột vip_only")
-
-    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='transactions'")
-    if cursor.fetchone() is None:
-        cursor.execute('''
-            CREATE TABLE transactions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER,
-                amount REAL,
-                type TEXT,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        ''')
-        logger.info("Đã tạo bảng transactions")
-
-    conn.commit()
-except Exception as e:
-    logger.error(f"Lỗi khi kiểm tra/tạo bảng: {str(e)}")
-    raise
-
-# Hàm gửi tin nhắn với retry, hỗ trợ parse_mode
-def send_message_with_retry(bot, chat_id, text, retries=5, delay=2, parse_mode=None):
-    for attempt in range(retries):
+    def _load_token_(self):
         try:
-            bot.send_message(chat_id, text, timeout=60, parse_mode=parse_mode)  # Tăng timeout lên 60 giây
-            logger.info(f"Đã gửi tin nhắn đến {chat_id}")
-            return
+            if not os.path.exists(self.TOKEN_FILE_PATH):
+                return self.fetch_token()
+            self._loader_(
+                f"{xColor.YELLOW}Verifying token integrity{Style.RESET_ALL}", 0.5)
+            with open(self.TOKEN_FILE_PATH, 'r') as file:
+                token_data=json.load(file)
+            if 'token' in token_data and 'expiry' in token_data:
+                if token_data['expiry'] > time.time():
+                    self._print(
+                        f"{xColor.GREEN}[+] {xColor.CYAN}Loaded token from file token.json: {xColor.YELLOW}{token_data['token'][:10] + '...' + token_data['token'][-10:]}")
+                    time.sleep(0.4)
+                    time_left=int(token_data['expiry'] - time.time())
+                    self._print(
+                        f"{xColor.GREEN}[+] {xColor.CYAN}Token expires in: {xColor.WHITE}{time_left//60} minutes {time_left % 60} seconds")
+                    return token_data['token']
+                else:
+                    self._print(
+                        f"{xColor.RED}[!]{xColor.RED} Locket token expired, trying to fetch new token")
+            return self.fetch_token()
         except Exception as e:
-            logger.error(f"Lỗi gửi tin nhắn (lần {attempt + 1}): {str(e)}")
-            if attempt < retries - 1:
-                time.sleep(delay * (2 ** attempt))
-            else:
-                raise
+            self._print(
+                f"{xColor.RED}[!] {xColor.YELLOW}Error loading token from file: {str(e)}")
+            return self.fetch_token()
 
-# Hàm tiện ích cho VIP
-def is_vip(user_id):
-    try:
-        cursor.execute("SELECT vip_expiry FROM users WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-        if result and result[0]:
-            expiry_date = datetime.strptime(result[0], "%Y-%m-%d %H:%M:%S")
-            return expiry_date > datetime.now()
-        return False
-    except Exception as e:
-        logger.error(f"Lỗi khi kiểm tra VIP: {str(e)}")
-        return False
-
-def set_vip(user_id, days=7):
-    try:
-        expiry_date = datetime.now() + timedelta(days=days)
-        cursor.execute("UPDATE users SET vip_expiry = ? WHERE user_id = ?", (expiry_date.strftime("%Y-%m-%d %H:%M:%S"), user_id))
-        conn.commit()
-        upload_to_cloudinary("database.db", "database.db")
-        logger.info(f"Đã đặt VIP cho user {user_id}, hết hạn: {expiry_date}")
-    except Exception as e:
-        logger.error(f"Lỗi khi cập nhật VIP: {str(e)}")
-        conn.rollback()
-
-def get_vip_expiry(user_id):
-    try:
-        cursor.execute("SELECT vip_expiry FROM users WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-        if result and result[0]:
-            return datetime.strptime(result[0], "%Y-%m-%d %H:%M:%S")
-        return None
-    except Exception as e:
-        logger.error(f"Lỗi khi lấy thời gian hết hạn VIP: {str(e)}")
-        return None
-
-# Hàm tiện ích
-def get_balance(user_id):
-    try:
-        cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-        return result[0] if result else 0
-    except Exception as e:
-        logger.error(f"Lỗi khi lấy số dư: {str(e)}")
-        return 0
-
-def update_balance(user_id, amount):
-    try:
-        cursor.execute(
-            "INSERT INTO users (user_id, balance) VALUES (?, ?) ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?",
-            (user_id, amount, amount))
-        cursor.execute(
-            "INSERT INTO transactions (user_id, amount, type) VALUES (?, ?, ?)",
-            (user_id, amount, "deposit" if amount > 0 else "purchase"))
-        conn.commit()
-        upload_to_cloudinary("database.db", "database.db")
-        logger.info("Đã cập nhật số dư")
-    except Exception as e:
-        logger.error(f"Lỗi khi cập nhật số dư: {str(e)}")
-        conn.rollback()
-
-def add_link(bypass_link, original_link, price, vip_only=0):
-    try:
-        cursor.execute(
-            "INSERT INTO links (bypass_link, original_link, price, vip_only) VALUES (?, ?, ?, ?)",
-            (bypass_link, original_link, price, vip_only))
-        conn.commit()
-        upload_to_cloudinary("database.db", "database.db")
-        return "✅ Link đã được thêm!"
-    except sqlite3.IntegrityError:
-        return "⚠️ Link này đã tồn tại!"
-    except Exception as e:
-        logger.error(f"Lỗi khi thêm link: {str(e)}")
-        return "❌ Đã xảy ra lỗi!"
-
-def get_link(bypass_link):
-    try:
-        cursor.execute("SELECT original_link, price, vip_only FROM links WHERE bypass_link = ?", (bypass_link,))
-        return cursor.fetchone()
-    except Exception as e:
-        logger.error(f"Lỗi khi lấy link: {str(e)}")
-        return None
-
-def format_currency(amount):
-    return "{:,}".format(int(float(amount))).replace(",", ".")
-
-# Lệnh /start
-@bot.message_handler(commands=["start"])
-def send_welcome(message):
-    user_id = message.chat.id
-    logger.info(f"Nhận lệnh /start từ user_id: {user_id}")
-    try:
-        cursor.execute("INSERT OR IGNORE INTO users (user_id, balance) VALUES (?, 0)", (user_id,))
-        conn.commit()
-        logger.info(f"Đã thêm hoặc bỏ qua user_id {user_id} vào database")
-    except Exception as e:
-        logger.error(f"Lỗi khi thêm user_id {user_id} vào database: {str(e)}")
-        return
-    send_message_with_retry(bot, message.chat.id, 
-        "🤖 Chào mừng đến BOT mua link!\n💰 /nap_tien - Nạp tiền\n🔍 /so_du - Kiểm tra số dư\n🛒 /mua_link - Mua link\n🎖 /buy_vip - Mua VIP"
-    )
-
-# Lệnh /vip
-@bot.message_handler(commands=["vip"])
-def check_vip(message):
-    user_id = message.chat.id
-    if is_vip(user_id):
-        expiry_date = get_vip_expiry(user_id)
-        expiry_str = expiry_date.strftime("%d/%m/%Y %H:%M:%S")
-        send_message_with_retry(bot, user_id, f"🎖 Bạn là thành viên VIP!\n⏳ Hết hạn: {expiry_str}\n🎁 Bạn có thể mua tất cả các link với giá 0 VND.")
-    else:
-        send_message_with_retry(bot, user_id, "❌ Bạn chưa là thành viên VIP. Dùng /buy_vip để nâng cấp (hiệu lực 7 ngày)!")
-
-# Lệnh /buy_vip
-@bot.message_handler(commands=["buy_vip"])
-def buy_vip(message):
-    user_id = message.chat.id
-    vip_price = 59000
-    balance = get_balance(user_id)
-
-    if is_vip(user_id):
-        expiry_date = get_vip_expiry(user_id)
-        expiry_str = expiry_date.strftime("%d/%m/%Y %H:%M:%S")
-        send_message_with_retry(bot, user_id, f"🎖 Bạn đã là thành viên VIP rồi!\n⏳ Hết hạn: {expiry_str}")
-        return
-
-    if balance < vip_price:
-        shortfall = vip_price - balance
-        send_message_with_retry(bot, user_id, 
-            f"❌ Số dư không đủ!\n"
-            f"💵 Giá VIP: {format_currency(vip_price)} VND\n"
-            f"💰 Số dư: {format_currency(balance)} VND\n"
-            f"📉 Bạn cần nạp thêm: {format_currency(shortfall)} VND\n"
-            f"👉 Dùng /nap_tien để nạp."
-        )
-        return
-
-    update_balance(user_id, -vip_price)
-    set_vip(user_id, days=7)
-    expiry_date = get_vip_expiry(user_id)
-    expiry_str = expiry_date.strftime("%d/%m/%Y %H:%M:%S")
-    send_message_with_retry(bot, user_id, 
-        f"🎉 Chúc mừng! Bạn đã trở thành thành viên VIP.\n"
-        f"⏳ Hết hạn: {expiry_str}\n"
-        f"💰 Số dư còn lại: {format_currency(get_balance(user_id))} VND\n"
-        f"🎁 Bạn có thể mua tất cả các link với giá 0 VND trong 7 ngày!"
-    )
-
-# Lệnh /so_du
-@bot.message_handler(commands=["so_du"])
-def check_balance(message):
-    user_id = message.chat.id
-    balance = get_balance(user_id)
-    formatted_balance = format_currency(balance)
-    if is_vip(user_id):
-        expiry_date = get_vip_expiry(user_id)
-        expiry_str = expiry_date.strftime("%d/%m/%Y %H:%M:%S")
-        vip_status = f"🎖 VIP - Mua link miễn phí\n⏳ Hết hạn: {expiry_str}"
-    else:
-        vip_status = "❌ Không phải VIP\n✅ VIP có thể mua tất cả các link với giá 0VND!\n✅ Lấy Link hoặc File chỉ dành cho VIP !!!"
-    send_message_with_retry(bot, message.chat.id, f"💰 Số dư của bạn: {formatted_balance} VND\n\n{vip_status}")
-
-# Lệnh /nap_tien
-@bot.message_handler(commands=["nap_tien"])
-def deposit_money(message):
-    user_id = message.chat.id
-    content = f"NAP{user_id}"
-    qr_code_url = f"https://img.vietqr.io/image/ICB-109878256183-compact.png?amount=100000&addInfo={content}"
-    msg_text = ("💵 Để nạp tiền, vui lòng chuyển khoản:\n"
-                "🏦 *VIETTINBANK*\n📌 STK: `109878256183`\n👤 TTK: *CAO DINH TUAN ANH*\n"
-                f"💬 Nội dung: `{content}`\n\n✅ NẠP TỐI THIỂU 10k\n✅ GỬI BILL ĐỂ XÁC NHẬN")
-    send_message_with_retry(bot, message.chat.id, msg_text, parse_mode="MarkdownV2")
-    bot.send_photo(message.chat.id, qr_code_url, caption="📌 Quét QR để nạp nhanh!\n✅ GỬI BILL ĐỂ XÁC NHẬN")
-
-# Xử lý ảnh bill
-@bot.message_handler(content_types=["photo"])
-def handle_bill_photo(message):
-    user_id = message.chat.id
-    file_id = message.photo[-1].file_id
-    file_info = bot.get_file(file_id)
-    file = bot.download_file(file_info.file_path)
-    cloudinary_response = cloudinary.uploader.upload(file, resource_type="image", public_id=f"bill_{user_id}")
-    cursor.execute("INSERT OR IGNORE INTO users (user_id, balance) VALUES (?, 0)", (user_id,))
-    cursor.execute("UPDATE users SET last_bill = ? WHERE user_id = ?", (cloudinary_response["url"], user_id))
-    conn.commit()
-    send_message_with_retry(bot, message.chat.id, "✅ Bill đã được lưu! Nhấn /XACNHAN để gửi.")
-
-# Lệnh /XACNHAN
-@bot.message_handler(commands=["XACNHAN"])
-def confirm_deposit(message):
-    user_id = message.chat.id
-    cursor.execute("SELECT last_bill FROM users WHERE user_id = ?", (user_id,))
-    result = cursor.fetchone()
-    if not result or not result[0]:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn chưa gửi ảnh bill.")
-        return
-    bill_photo = result[0]
-    bot.send_photo(ADMIN_ID, bill_photo, caption=f"🔔 *Xác nhận nạp tiền*\n👤 User ID: {user_id}\n- /confirm{user_id} : Xác nhận và cộng tiền\n- /deny{user_id} : Từ chối", parse_mode="Markdown")
-    send_message_with_retry(bot, message.chat.id, "✅ Bill đã gửi, chờ xác nhận.")
-
-# Lệnh /confirm<user_id>
-@bot.message_handler(regexp=r"^/confirm\d+$")
-def handle_admin_confirm(message):
-    if message.chat.id != ADMIN_ID:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn không có quyền xác nhận.")
-        return
-    user_id = message.text.replace("/confirm", "")
-    msg = bot.send_message(ADMIN_ID, f"💰 Nhập số tiền muốn cộng cho user {user_id}:", reply_markup=ForceReply())
-    bot.register_next_step_handler(msg, process_add_money, user_id)
-
-def process_add_money(message, user_id):
-    if message.chat.id != ADMIN_ID:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn không có quyền thực hiện hành động này.")
-        return
-    try:
-        amount = int(message.text)
-        update_balance(int(user_id), amount)
-        cursor.execute("UPDATE users SET last_bill = NULL WHERE user_id = ?", (user_id,))
-        conn.commit()
-        balance = get_balance(user_id)
-        formatted_balance = format_currency(balance)
-        send_message_with_retry(bot, user_id, f"✅ Nạp tiền thành công! {amount:,} VND đã được cộng. Số dư: {formatted_balance} VND\n👉 /start")
-        send_message_with_retry(bot, ADMIN_ID, f"✔ Đã cộng {amount:,} VND cho user {user_id}")
-    except ValueError:
-        send_message_with_retry(bot, ADMIN_ID, "❌ Số tiền không hợp lệ. Nhập số nguyên.")
-    except Exception as e:
-        send_message_with_retry(bot, ADMIN_ID, f"❌ Lỗi: {str(e)}")
-
-# Lệnh /deny<user_id>
-@bot.message_handler(regexp=r"^/deny\d+$")
-def handle_admin_deny(message):
-    if message.chat.id != ADMIN_ID:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn không có quyền từ chối.")
-        return
-    user_id = message.text.replace("/deny", "")
-    cursor.execute("UPDATE users SET last_bill = NULL WHERE user_id = ?", (user_id,))
-    conn.commit()
-    upload_to_cloudinary("database.db", "database.db")
-    send_message_with_retry(bot, user_id, "❌ Yêu cầu nạp tiền đã bị từ chối.")
-    send_message_with_retry(bot, ADMIN_ID, f"✅ Đã từ chối yêu cầu của user {user_id}")
-
-# Lệnh /mua_link
-@bot.message_handler(commands=["mua_link"])
-def mua_link_step1(message):
-    send_message_with_retry(bot, message.chat.id, "🔗 Nhập link vượt bạn muốn mua:")
-    bot.register_next_step_handler(message, mua_link_step2)
-
-def mua_link_step2(message):
-    link_vuot = message.text
-    user_id = message.chat.id
-    link_data = get_link(link_vuot)
-    if not link_data:
-        send_message_with_retry(bot, message.chat.id, "❌ Link không tồn tại.")
-        return
-    original_link, price, vip_only = link_data
-
-    if vip_only and not is_vip(user_id):
-        send_message_with_retry(bot, message.chat.id, "❌ Link này chỉ dành cho thành viên VIP! Dùng /buy_vip để nâng cấp.")
-        return
-
-    if is_vip(user_id):
-        price = 0
-        send_message_with_retry(bot, user_id, "🎖 Bạn là VIP, được mua link này với giá 0 VND!")
-    else:
-        balance = get_balance(user_id)
-        if balance < price:
-            shortfall = price - balance
-            formatted_price = format_currency(price)
-            formatted_balance = format_currency(balance)
-            formatted_shortfall = format_currency(shortfall)
-            send_message_with_retry(bot, message.chat.id, 
-                f"❌ Số dư không đủ!\n"
-                f"💵 Giá: {formatted_price} VND\n"
-                f"💰 Số dư: {formatted_balance} VND\n"
-                f"📉 Bạn cần nạp thêm: {formatted_shortfall} VND để đủ tiền mua link này."
-            )
-            return
-
-    update_balance(user_id, -price)
-    time.sleep(1)  # Tăng độ trễ lên 1 giây để tránh giới hạn
-    send_message_with_retry(bot, message.chat.id, 
-        f"🎉 Mua thành công!\n"
-        f"🔗 Link: {original_link}\n"
-        f"💰 Số dư còn lại: {format_currency(get_balance(user_id))} VND"
-    )
-
-# Lệnh /admin
-@bot.message_handler(commands=["admin"])
-def admin_menu(message):
-    if message.chat.id != ADMIN_ID:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn không có quyền truy cập.")
-        return
-    send_message_with_retry(bot, message.chat.id, 
-        "👨‍💻 **Menu Admin**\n"
-        "- /add_link : Thêm link\n"
-        "- /delete_link : Xóa link\n"
-        "- /list_users : Danh sách người dùng\n"
-        "- /list_links : Danh sách link\n"
-        "- /adjust_balance : Điều chỉnh số dư\n"
-        "- /set_vip : Cấp/xóa VIP\n"
-        "- /announcement : Gửi thông báo"
-    )
-
-# Lệnh /set_vip
-@bot.message_handler(commands=["set_vip"])
-def admin_set_vip_step1(message):
-    if message.chat.id != ADMIN_ID:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn không có quyền.")
-        return
-    msg = bot.send_message(ADMIN_ID, "👤 Nhập ID người dùng:")
-    bot.register_next_step_handler(msg, admin_set_vip_step2)
-
-def admin_set_vip_step2(message):
-    user_id = message.text
-    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
-    if not cursor.fetchone():
-        send_message_with_retry(bot, message.chat.id, "❌ Người dùng không tồn tại.")
-        return
-    msg = bot.send_message(ADMIN_ID, "⏳ Nhập số ngày VIP (0 để xóa):")
-    bot.register_next_step_handler(msg, admin_set_vip_step3, user_id)
-
-def admin_set_vip_step3(message, user_id):
-    try:
-        days = int(message.text)
-        if days < 0:
-            send_message_with_retry(bot, ADMIN_ID, "❌ Số ngày không hợp lệ.")
-            return
-        if days == 0:
-            cursor.execute("UPDATE users SET vip_expiry = NULL WHERE user_id = ?", (user_id,))
-            conn.commit()
-            upload_to_cloudinary("database.db", "database.db")
-            send_message_with_retry(bot, ADMIN_ID, f"✅ Đã xóa VIP của user {user_id}")
-            send_message_with_retry(bot, int(user_id), "❌ Bạn không còn là thành viên VIP.")
-        else:
-            set_vip(int(user_id), days)
-            expiry_date = get_vip_expiry(user_id)
-            expiry_str = expiry_date.strftime("%d/%m/%Y %H:%M:%S")
-            send_message_with_retry(bot, ADMIN_ID, f"✅ Đã cấp VIP cho user {user_id}, hết hạn: {expiry_str}")
-            send_message_with_retry(bot, int(user_id), f"🎖 Bạn đã được cấp VIP!\n⏳ Hết hạn: {expiry_str}")
-    except ValueError:
-        send_message_with_retry(bot, ADMIN_ID, "❌ Giá trị không hợp lệ.")
-    except Exception as e:
-        send_message_with_retry(bot, ADMIN_ID, f"❌ Lỗi: {str(e)}")
-
-# Lệnh /add_link
-@bot.message_handler(commands=["add_link"])
-def admin_add_link_step1(message):
-    if message.chat.id != ADMIN_ID:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn không có quyền.")
-        return
-    msg = bot.send_message(ADMIN_ID, "🔗 Nhập link vượt:")
-    bot.register_next_step_handler(msg, admin_add_link_step2)
-
-def admin_add_link_step2(message):
-    bypass_link = message.text
-    msg = bot.send_message(ADMIN_ID, "🔗 Nhập link origen:")
-    bot.register_next_step_handler(msg, admin_add_link_step3, bypass_link)
-
-def admin_add_link_step3(message, bypass_link):
-    original_link = message.text
-    msg = bot.send_message(ADMIN_ID, "💰 Nhập giá (VND):")
-    bot.register_next_step_handler(msg, admin_add_link_step4, bypass_link, original_link)
-
-def admin_add_link_step4(message, bypass_link, original_link):
-    try:
-        price = int(message.text)
-        msg = bot.send_message(ADMIN_ID, "🎖 Link chỉ dành cho VIP? (1 = Có, 0 = Không):")
-        bot.register_next_step_handler(msg, admin_add_link_step5, bypass_link, original_link, price)
-    except ValueError:
-        send_message_with_retry(bot, ADMIN_ID, "❌ Giá phải là số nguyên.")
-
-def admin_add_link_step5(message, bypass_link, original_link, price):
-    try:
-        vip_only = int(message.text)
-        if vip_only not in [0, 1]:
-            send_message_with_retry(bot, ADMIN_ID, "❌ Chỉ nhập 0 hoặc 1.")
-            return
-        result = add_link(bypass_link, original_link, price, vip_only)
-        vip_text = " (Chỉ dành cho VIP)" if vip_only else ""
-        send_message_with_retry(bot, ADMIN_ID, f"{result}{vip_text}")
-    except ValueError:
-        send_message_with_retry(bot, ADMIN_ID, "❌ Giá trị không hợp lệ.")
-
-# Lệnh /delete_link
-@bot.message_handler(commands=["delete_link"])
-def admin_delete_link(message):
-    if message.chat.id != ADMIN_ID:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn không có quyền.")
-        return
-    msg = bot.send_message(ADMIN_ID, "🔗 Nhập link vượt cần xóa:")
-    bot.register_next_step_handler(msg, process_delete_link)
-
-def process_delete_link(message):
-    bypass_link = message.text
-    cursor.execute("DELETE FROM links WHERE bypass_link = ?", (bypass_link,))
-    conn.commit()
-    if cursor.rowcount > 0:
-        upload_to_cloudinary("database.db", "database.db")
-        send_message_with_retry(bot, message.chat.id, f"✅ Đã xóa link: {bypass_link}")
-    else:
-        send_message_with_retry(bot, message.chat.id, "❌ Link không tồn tại.")
-
-# Lệnh /list_users
-@bot.message_handler(commands=["list_users"])
-def list_users(message):
-    if message.chat.id != ADMIN_ID:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn không có quyền.")
-        return
-    cursor.execute("SELECT user_id, balance, vip_expiry FROM users WHERE balance > 0")
-    users = cursor.fetchall()
-    if not users:
-        send_message_with_retry(bot, message.chat.id, "❌ Không có người dùng nào có số dư lớn hơn 0.")
-        return
-
-    user_list = "📋 Danh sách người dùng (Số dư > 0):\n"
-    for user_id, balance, vip_expiry in users:
-        vip_status = "🎖 VIP" if is_vip(user_id) else "❌ Không VIP"
-        if vip_expiry and is_vip(user_id):
-            expiry_date = datetime.strptime(vip_expiry, "%Y-%m-%d %H:%M:%S")
-            expiry_str = expiry_date.strftime("%d/%m/%Y %H:%M:%S")
-            vip_info = f" - Hết hạn: {expiry_str}"
-        else:
-            vip_info = ""
-        user_list += f"- ID: {user_id}, Số dư: {format_currency(balance)} VND, {vip_status}{vip_info}\n"
-
-    file = io.BytesIO(user_list.encode('utf-8'))
-    file.name = "user_list.txt"
-    bot.send_document(message.chat.id, file, caption="📋 Danh sách người dùng (Số dư > 0)")
-    file.close()
-
-# Lệnh /list_links
-@bot.message_handler(commands=["list_links"])
-def list_links(message):
-    if message.chat.id != ADMIN_ID:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn không có quyền.")
-        return
-    cursor.execute("SELECT bypass_link, original_link, price, vip_only FROM links")
-    links = cursor.fetchall()
-    if not links:
-        send_message_with_retry(bot, message.chat.id, "❌ Không có link.")
-        return
-    link_list = "🔗 *Danh sách link:*\n\n"
-    for idx, (bypass_link, original_link, price, vip_only) in enumerate(links, 1):
-        vip_text = " (Chỉ VIP)" if vip_only else ""
-        link_list += (f"{idx}. **Link vượt**: `{escape_markdown(bypass_link)}`\n"
-                      f"   **Link gốc**: `{escape_markdown(original_link)}`\n"
-                      f"   **Giá**: `{format_currency(price)} VND`{vip_text}\n\n")
-    send_message_with_retry(bot, message.chat.id, link_list, parse_mode="Markdown")
-
-# Lệnh /adjust_balance
-@bot.message_handler(commands=["adjust_balance"])
-def admin_adjust_balance_step1(message):
-    if message.chat.id != ADMIN_ID:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn không có quyền.")
-        return
-    msg = bot.send_message(ADMIN_ID, "👤 Nhập ID người dùng:")
-    bot.register_next_step_handler(msg, admin_adjust_balance_step2)
-
-def admin_adjust_balance_step2(message):
-    user_id = message.text
-    cursor.execute("SELECT balance FROM users WHERE user_id = ?", (user_id,))
-    if not cursor.fetchone():
-        send_message_with_retry(bot, message.chat.id, "❌ Người dùng không tồn tại.")
-        return
-    msg = bot.send_message(ADMIN_ID, "💰 Nhập số tiền (dương để cộng, âm để trừ):")
-    bot.register_next_step_handler(msg, admin_adjust_balance_step3, user_id)
-
-def admin_adjust_balance_step3(message, user_id):
-    try:
-        amount = int(message.text)
-        update_balance(int(user_id), amount)
-        send_message_with_retry(bot, ADMIN_ID, f"✅ Đã điều chỉnh số dư cho user {user_id}. Số dư mới: {format_currency(get_balance(user_id))} VND")
-    except ValueError:
-        send_message_with_retry(bot, ADMIN_ID, "❌ Số tiền không hợp lệ.")
-    except Exception as e:
-        send_message_with_retry(bot, ADMIN_ID, f"❌ Lỗi: {str(e)}")
-
-# Lệnh /announcement
-@bot.message_handler(commands=["announcement"])
-def admin_announcement(message):
-    if message.chat.id != ADMIN_ID:
-        send_message_with_retry(bot, message.chat.id, "❌ Bạn không có quyền.")
-        return
-    msg = bot.send_message(ADMIN_ID, "📢 Nhập nội dung thông báo:")
-    bot.register_next_step_handler(msg, process_announcement)
-
-def process_announcement(message):
-    content = message.text
-    cursor.execute("SELECT user_id FROM users")
-    users = cursor.fetchall()
-    if not users:
-        send_message_with_retry(bot, ADMIN_ID, "❌ Không có người dùng để gửi thông báo.")
-        return
-    success_count = 0
-    for (user_id,) in users:
+    def save_token(self, token):
         try:
-            send_message_with_retry(bot, user_id, f"📢 *Thông báo từ BIGCHANG:*\n{content}", parse_mode="Markdown")
-            success_count += 1
-            time.sleep(1)  # Tăng độ trễ lên 1 giây để tránh giới hạn
+            token_data={
+                'token': token,
+                'expiry': time.time() + self.TOKEN_EXPIRY_TIME,
+                'created_at': time.time()
+            }
+            with open(self.TOKEN_FILE_PATH, 'w') as file:
+                json.dump(token_data, file, indent=4)
+
+            self._print(
+                f"{xColor.GREEN}[+] {xColor.CYAN}Token saved to {xColor.WHITE}{self.TOKEN_FILE_PATH}")
+            return True
+        except Exception as e:
+            self._print(
+                f"{xColor.RED}[!] {xColor.YELLOW}Error saving token to file: {str(e)}")
+            return False
+
+    def fetch_token(self, retry=0, max_retries=3):
+        if retry == 0:
+            self._print(
+                f"{xColor.MAGENTA}[*] {xColor.CYAN}Initializing token authentication sequence")
+            self._loader_("Establishing secure connection", 1)
+        if retry >= max_retries:
+            self._print(
+                f"{xColor.RED}[!] {xColor.YELLOW}Token acquisition failed after {max_retries} attempts")
+            self._loader_("Emergency shutdown", 1)
+            sys.exit(1)
+        try:
+            self._print(
+                f"{xColor.MAGENTA}[*] {xColor.CYAN}Preparing to retrieve token [{retry+1}/{max_retries}]")
+            response=requests.get(self.TOKEN_API_URL, timeout=self.request_timeout, proxies={
+                                    "http": None, "https": None})
+            response.raise_for_status()
+            data=response.json()
+            if not isinstance(data, dict):
+                self._print(
+                    f"{xColor.YELLOW}[!] {xColor.WHITE}Invalid response format, retrying...")
+                time.sleep(0.5)
+                return self.fetch_token(retry + 1)
+            if data.get("code") == 200 and "data" in data and "token" in data["data"]:
+                token=data["data"]["token"]
+                self._print(
+                    f"{xColor.GREEN}[+] {xColor.CYAN}Token acquired successfully")
+                masked_token=token[:10] + "..." + token[-10:]
+                self._print(
+                    f"{xColor.GREEN}[+] {xColor.WHITE}Token: {xColor.YELLOW}{masked_token}")
+                self.save_token(token)
+                return token
+            elif data.get("code") in (403, 404, 502, 503, 504, 429, 500):
+                self._print(
+                    f"{xColor.YELLOW}[!] {xColor.RED}The Locket token server is no longer available, please contact us telegram @{self.author}, trying again...")
+                time.sleep(1.3)
+                return self.fetch_token(retry + 1)
+            else:
+                self._print(
+                    f"{xColor.YELLOW}[!] {xColor.RED}{data.get('msg')}")
+                time.sleep(1.3)
+                return self.fetch_token(retry + 1)
+        except requests.exceptions.RequestException as e:
+            self._print(
+                f"{xColor.RED}[!] Warning: {xColor.YELLOW}Token unauthorized, retrying... {e}")
+            self._loader_("Attempting to reconnect", 1)
+            time.sleep(1.3)
+            return self.fetch_token(retry + 1)
+
+    def headers_locket(self):
+        return {
+            'Host': 'api.locketcamera.com',
+            'Accept': '*/*',
+            'baggage': 'sentry-environment=production,sentry-public_key=78fa64317f434fd89d9cc728dd168f50,sentry-release=com.locket.Locket%401.121.1%2B1,sentry-trace_id=2cdda588ea0041ed93d052932b127a3e',
+            'X-Firebase-AppCheck': self.FIREBASE_APP_CHECK,
+            'Accept-Language': 'vi-VN,vi;q=0.9',
+            'sentry-trace': '2cdda588ea0041ed93d052932b127a3e-a3e2ba7a095d4f9d-0',
+            'User-Agent': 'com.locket.Locket/1.121.1 iPhone/18.2 hw/iPhone12_1',
+            'Firebase-Instance-ID-Token': 'd7ChZwJHhEtsluXwXxbjmj:APA91bFoMIgxwf-2tmY9QLy82lKMEWL6S4d8vb9ctY3JxLLTQB1k6312TcgtqJjWFhQVz_J4wIFvE0Kfroztu1vbZDOFc65s0vvj68lNJM4XuJg1onEODiBG3r7YGrQLiHkBV1gEoJ5f',
+            'Connection': 'keep-alive',
+            'Content-Type': 'application/json',
+        }
+
+    def firebase_headers_locket(self):
+        base_headers=self.headers_locket()
+        return {
+            'Host': 'www.googleapis.com',
+            'baggage': base_headers.get('baggage', ''),
+            'Accept': '*/*',
+            'X-Client-Version': 'iOS/FirebaseSDK/10.23.1/FirebaseCore-iOS',
+            'X-Firebase-AppCheck': self.FIREBASE_APP_CHECK,
+            'X-Ios-Bundle-Identifier': self.IOS_BUNDLE_ID,
+            'X-Firebase-GMPID': '1:641029076083:ios:cc8eb46290d69b234fa606',
+            'X-Firebase-Client': 'H4sIAAAAAAAAAKtWykhNLCpJSk0sKVayio7VUSpLLSrOzM9TslIyUqoFAFyivEQfAAAA',
+            'sentry-trace': base_headers.get('sentry-trace', ''),
+            'Accept-Language': 'vi',
+            'User-Agent': 'FirebaseAuth.iOS/10.23.1 com.locket.Locket/1.121.1 iPhone/18.2 hw/iPhone12_1',
+            'Connection': 'keep-alive',
+            'X-Firebase-GMPID': self.FIREBASE_GMPID,
+            'Content-Type': 'application/json',
+        }
+
+    def analytics_payload(self):
+        return {
+            "platform": "ios",
+            "experiments": {
+                "flag_4": {
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                    "value": "43",
+                },
+                "flag_10": {
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                    "value": "505",
+                },
+                "flag_6": {
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                    "value": "2000",
+                },
+                "flag_3": {
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                    "value": "501",
+                },
+                "flag_22": {
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                    "value": "1203",
+                },
+                "flag_18": {
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                    "value": "1203",
+                },
+                "flag_17": {
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                    "value": "1010",
+                },
+                "flag_16": {
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                    "value": "303",
+                },
+                "flag_15": {
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                    "value": "501",
+                },
+                "flag_14": {
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                    "value": "551",
+                },
+                "flag_25": {
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                    "value": "23",
+                },
+            },
+            "amplitude": {
+                "device_id": "57A54C21-B633-418C-A6E3-4201E631178C",
+                "session_id": {
+                    "value": str(self.session_id),
+                    "@type": "type.googleapis.com/google.protobuf.Int64Value",
+                },
+            },
+            "google_analytics": {"app_instance_id": "7E17CEB525FA4471BD6AA9CEC2C1BCB8"},
+            "ios_version": "1.121.1.1",
+        }
+
+    def excute(self, url, headers=None, payload=None, thread_id=None, step=None, proxies_dict=None):
+        prefix=f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}{step}{Style.RESET_ALL}]" if thread_id is not None and step else ""
+        try:
+            response=requests.post(
+                url,
+                headers=headers or self.headers_locket(),
+                json=payload,
+                proxies=proxies_dict,
+                timeout=self.request_timeout,
+                verify=False
+            )
+            response.raise_for_status()
+            self.successful_requests+=1
+            return response.json() if response.content else True
+        except ProxyError:
+            self._print(
+                f"{prefix} {xColor.RED}[!] Proxy connection terminated")
+            self.failed_requests+=1
+            return "proxy_dead"
+        except requests.exceptions.RequestException as e:
+            self.failed_requests+=1
+            if hasattr(e, 'response') and e.response is not None:
+                status_code=e.response.status_code
+                try:
+                    error_data=e.response.json()
+                    error_msg=error_data.get(
+                        'error', 'Remote server rejected request')
+                    self._print(
+                        f"{prefix} {xColor.RED}[!] HTTP {status_code}: {error_msg}")
+                except:
+                    self._print(
+                        f"{prefix} {xColor.RED}[!] Server connection timeout")
+                if status_code == 429:
+                    return "too_many_requests"
+            return None
+
+    def _extract_uid_locket(self, url: str) -> Optional[str]:
+        real_url=self._convert_url(url)
+        if not real_url:
+            self.messages.append(
+                f"Locket account not found, please try again.")
+            return None
+        parsed_url=urlparse(real_url)
+        if parsed_url.hostname != "locket.camera":
+            self.messages.append(
+                f"Locket URL không hợp lệ: {parsed_url.hostname}")
+            return None
+        if not parsed_url.path.startswith("/invites/"):
+            self.messages.append(
+                f"Link Locket Sai Định Dạng: {parsed_url.path}")
+            return None
+        parts=parsed_url.path.split("/")
+        if len(parts) > 2:
+            full_uid=parts[2]
+            uid=full_uid[:28]
+            return uid
+        self.messages.append("Không tìm thấy UID trong Link Locket")
+        return None
+
+    def _convert_url(self, url: str) -> str:
+        if url.startswith("https://locket.camera/invites/"):
+            return url
+        if url.startswith("https://locket.cam/"):
+            try:
+                resp=requests.get(
+                    url,
+                    headers={
+                        "User-Agent":
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0"
+                    },
+                    timeout=self.request_timeout,
+                )
+                if resp.status_code == 200:
+                    match=re.search(
+                        r'window\.location\.href\s*=\s*"([^"]+)"', resp.text)
+                    if match:
+                        parsed=urlparse(match.group(1))
+                        query=parse_qs(parsed.query)
+                        enc_link=query.get("link", [None])[0]
+                        if enc_link:
+                            return enc_link
+                        else:
+                            return None
+                    else:
+                        return None
+                else:
+                    return None
+            except Exception as e:
+                self.messages.append(
+                    f"Failed to connect to the Locket server.")
+                return ""
+        payload={"type": "toLong", "kind": "url.thanhdieu.com", "url": url}
+        headers={
+            "Accept": "*/*",
+            "Accept-Language": "vi",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+            "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.3 Safari/605.1.15",
+            "X-Requested-With": "XMLHttpRequest",
+        }
+        try:
+            response=requests.post(
+                self.SHORT_URL,
+                headers=headers,
+                data=urlencode(payload),
+                timeout=self.request_timeout,
+                verify=True,
+            )
+            response.raise_for_status()
+            _res=response.json()
+            if _res.get("status") == 1 and "url" in _res:
+                return _res["url"]
+            self.messages.append("Lỗi kết nối tới API Url.ThanhDieu.Com")
+            return ""
+        except requests.exceptions.RequestException as e:
+            self.messages.append(
+                "Lỗi kết nối tới API Url.ThanhDieu.Com " + str(e))
+            return ""
+        except ValueError:
+            self.messages.append("Lỗi kết nối tới API Url.ThanhDieu.Com")
+            return ""
+
+# Telegram Bot Functions
+def send_message_to_admin(message):
+    """Send message to admin"""
+    global bot
+    if bot:
+        try:
+            # Thay YOUR_ADMIN_CHAT_ID bằng chat ID của bạn
+            # Để lấy chat ID, gửi tin nhắn cho bot và check log
+            bot.send_message(YOUR_ADMIN_CHAT_ID, message, parse_mode='HTML')
         except:
             pass
-    send_message_with_retry(bot, ADMIN_ID, f"✅ Đã gửi thông báo đến {success_count} người dùng.")
 
-# Giữ bot chạy
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
+def setup_bot_handlers():
+    """Setup all bot message handlers"""
+    
+    @bot.message_handler(commands=['start'])
+    def start_command(message):
+        welcome_text = f"""
+🔒 <b>zLocket Tool Pro - Telegram Bot</b>
 
-# Khởi động bot
-if __name__ == "__main__":
-    logger.info("Bot đang khởi động...")
-    keep_alive()
-    while True:
+Chào mừng! Đây là bot điều khiển tool zLocket.
+
+<b>Các lệnh có sẵn:</b>
+/start - Hiển thị menu chính
+/spam [target] [custom_name] - Bắt đầu spam
+/stop - Dừng spam
+/status - Kiểm tra trạng thái
+/help - Hướng dẫn sử dụng
+
+<b>Ví dụ sử dụng:</b>
+<code>/spam username123 MyCustomName</code>
+<code>/spam https://locket.cam/username123</code>
+
+<i>Phát triển bởi @{config.author if config else 'WsThanhDieu'}</i>
+"""
+
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("🚀 Bắt đầu spam", callback_data="start_spam"),
+            types.InlineKeyboardButton("⛔ Dừng spam", callback_data="stop_spam")
+        )
+        markup.row(
+            types.InlineKeyboardButton("📊 Trạng thái", callback_data="status"),
+            types.InlineKeyboardButton("❓ Hướng dẫn", callback_data="help")
+        )
+
+        bot.send_message(message.chat.id, welcome_text, parse_mode='HTML', reply_markup=markup)
+
+    @bot.message_handler(commands=['spam'])
+    def spam_command(message):
+        global tool_running, tool_thread, config, stop_event
+
+        if tool_running:
+            bot.reply_to(message, "❌ Tool đang chạy! Sử dụng /stop để dừng trước.")
+            return
+
+        args = message.text.split()[1:]
+        if len(args) < 1:
+            bot.reply_to(message, "❌ Thiếu tham số!\n\nSử dụng: /spam [target] [custom_name]\nVí dụ: /spam username123 MyName")
+            return
+
+        target = args[0]
+        custom_name = args[1] if len(args) > 1 else "zLocket Tool Pro"
+
+        # Khởi tạo config nếu chưa có
+        if not config:
+            config = zLocket()
+
+        # Xử lý target URL
+        url = target.strip()
+        if not url.startswith(("http://", "https://")) and not url.startswith("locket."):
+            url = f"https://locket.cam/{url}"
+        if url.startswith("locket."):
+            url = f"https://{url}"
+
+        # Extract UID
+        config.messages = []
+        uid = config._extract_uid_locket(url)
+
+        if not uid:
+            error_msg = "❌ Không thể lấy UID từ target:\n"
+            for msg in config.messages:
+                error_msg += f"• {msg}\n"
+            bot.reply_to(message, error_msg)
+            return
+
+        # Cấu hình
+        config.TARGET_FRIEND_UID = uid
+        config.NAME_TOOL = custom_name
+        config.USE_EMOJI = True
+
+        bot.reply_to(message, f"✅ Đã cấu hình thành công!\n\n🎯 Target UID: <code>{uid}</code>\n👤 Custom Name: <code>{custom_name}</code>\n\n🚀 Đang khởi động tool...", parse_mode='HTML')
+
+        # Bắt đầu spam thread
+        def run_spam():
+            global tool_running, stop_event
+            try:
+                tool_running = True
+                stop_event = threading.Event()
+
+                # Khởi tạo proxy
+                proxy_queue, num_threads = init_proxy()
+                num_threads = min(num_threads, 20)  # Giới hạn threads
+
+                send_message_to_admin(f"🚀 Tool đã khởi động với {num_threads} threads")
+
+                threads = []
+                for i in range(num_threads):
+                    if not tool_running:
+                        break
+                    thread = threading.Thread(
+                        target=step1_create_account,
+                        args=(i, proxy_queue, stop_event)
+                    )
+                    threads.append(thread)
+                    thread.daemon = True
+                    thread.start()
+
+                send_message_to_admin("✅ Tất cả threads đã được khởi động! Spam đang chạy...")
+
+                # Chờ cho đến khi tool_running = False
+                while tool_running and any(t.is_alive() for t in threads):
+                    time.sleep(1)
+
+                # Dừng tất cả threads
+                stop_event.set()
+                for thread in threads:
+                    thread.join(timeout=2)
+
+                send_message_to_admin("⛔ Tool đã dừng hoàn toàn!")
+
+            except Exception as e:
+                send_message_to_admin(f"❌ Lỗi: {str(e)}")
+            finally:
+                tool_running = False
+
+        tool_thread = threading.Thread(target=run_spam)
+        tool_thread.start()
+
+    @bot.message_handler(commands=['stop'])
+    def stop_command(message):
+        global tool_running, stop_event
+
+        if not tool_running:
+            bot.reply_to(message, "ℹ️ Tool hiện không chạy.")
+            return
+
+        tool_running = False
+        if stop_event:
+            stop_event.set()
+
+        bot.reply_to(message, "⛔ Đang dừng tool...")
+
+    @bot.message_handler(commands=['status'])
+    def status_command(message):
+        global tool_running, config
+
+        if tool_running:
+            status_text = "🟢 <b>Tool đang chạy</b>\n\n"
+            if config:
+                elapsed = time.time() - config.start_time
+                hours, remainder = divmod(int(elapsed), 3600)
+                minutes, seconds = divmod(remainder, 60)
+                success_rate = (config.successful_requests / (config.successful_requests + config.failed_requests)) * 100 if (config.successful_requests + config.failed_requests) > 0 else 0
+
+                status_text += f"⏱️ Runtime: <code>{hours:02d}:{minutes:02d}:{seconds:02d}</code>\n"
+                status_text += f"✅ Success: <code>{config.successful_requests}</code>\n"
+                status_text += f"❌ Failed: <code>{config.failed_requests}</code>\n"
+                status_text += f"📊 Success Rate: <code>{success_rate:.1f}%</code>\n"
+                status_text += f"🎯 Target: <code>{config.TARGET_FRIEND_UID}</code>\n"
+                status_text += f"👤 Name: <code>{config.NAME_TOOL}</code>"
+        else:
+            status_text = "🔴 <b>Tool đang dừng</b>"
+
+        bot.reply_to(message, status_text, parse_mode='HTML')
+
+    @bot.message_handler(commands=['help'])
+    def help_command(message):
+        help_text = """
+<b>🔒 zLocket Tool Pro - Hướng dẫn sử dụng</b>
+
+<b>Các lệnh chính:</b>
+• <code>/start</code> - Menu chính
+• <code>/spam [target] [custom_name]</code> - Bắt đầu spam
+• <code>/stop</code> - Dừng spam
+• <code>/status</code> - Kiểm tra trạng thái
+• <code>/help</code> - Hướng dẫn này
+
+<b>Cách sử dụng lệnh /spam:</b>
+<code>/spam username123</code>
+<code>/spam username123 MyCustomName</code>
+<code>/spam https://locket.cam/username123</code>
+<code>/spam https://locket.cam/username123 MyName</code>
+
+<b>Lưu ý:</b>
+• Target có thể là username hoặc link đầy đủ
+• Custom name tối đa 20 ký tự (tùy chọn)
+• Tool sẽ tự động random emoji
+• Sử dụng /stop để dừng tool bất cứ lúc nào
+
+<b>Liên hệ:</b> @WsThanhDieu
+"""
+        bot.reply_to(message, help_text, parse_mode='HTML')
+
+    @bot.callback_query_handler(func=lambda call: True)
+    def callback_query(call):
+        if call.data == "start_spam":
+            bot.send_message(call.message.chat.id, "🚀 Để bắt đầu spam, sử dụng lệnh:\n\n<code>/spam [target] [custom_name]</code>\n\nVí dụ:\n<code>/spam username123 MyName</code>", parse_mode='HTML')
+        elif call.data == "stop_spam":
+            stop_command(call.message)
+        elif call.data == "status":
+            status_command(call.message)
+        elif call.data == "help":
+            help_command(call.message)
+
+# Helper functions (giữ nguyên từ code cũ)
+def _rand_str_(length=10, chars=string.ascii_lowercase + string.digits):
+    return ''.join(random.choice(chars) for _ in range(length))
+
+def _rand_name_():
+    return _rand_str_(8, chars=string.ascii_lowercase)
+
+def _rand_email_():
+    return f"{_rand_str_(15)}@thanhdieu.com"
+
+def _rand_pw_():
+    return 'zlocket' + _rand_str_(4)
+
+def load_proxies():
+    proxies=[]
+    proxy_urls=config.PROXY_LIST
+    config._print(
+        f"{xColor.MAGENTA}{Style.BRIGHT}[*] {xColor.CYAN}Initializing proxy collection system...")
+    try:
+        with open('proxy.txt', 'r', encoding='utf-8') as f:
+            file_proxies=[line.strip() for line in f if line.strip()]
+            config._print(
+                f"{xColor.MAGENTA}[+] {xColor.GREEN}Found {xColor.WHITE}{len(file_proxies)} {xColor.GREEN}proxies in local storage (proxy.txt)")
+            config._loader_("Processing local proxies", 1)
+            proxies.extend(file_proxies)
+    except FileNotFoundError:
+        config._print(
+            f"{xColor.YELLOW}[!] {xColor.RED}No local proxy file detected, trying currently available proxies...")
+    for url in proxy_urls:
         try:
-            bot.polling(none_stop=True, interval=0, timeout=60)  # Tăng timeout lên 60 giây
-        except Exception as e:
-            logger.error(f"Lỗi polling: {str(e)}")
-            time.sleep(5)  # Chờ 5 giây trước khi thử lại
+            config._print(
+                f"{xColor.MAGENTA}[*] {xColor.CYAN}Fetching proxies from {xColor.WHITE}{url}")
+            config._loader_(f"Connecting to {url.split('/')[2]}", 1)
+            response=requests.get(url, timeout=config.request_timeout)
+            response.raise_for_status()
+            url_proxies=[line.strip()
+                           for line in response.text.splitlines() if line.strip()]
+            proxies.extend(url_proxies)
+            config._print(
+                f"{xColor.MAGENTA}[+] {xColor.GREEN}Harvested {xColor.WHITE}{len(url_proxies)} {xColor.GREEN}proxies from {url.split('/')[2]}")
+        except requests.exceptions.RequestException as e:
+            config._print(
+                f"{xColor.RED}[!] {xColor.YELLOW}Connection failed: {url.split('/')[2]} - {str(e)}")
+    proxies=list(set(proxies))
+    if not proxies:
+        config._print(
+            f"{xColor.RED}[!] Warning: No proxies available for operation")
+        return []
+    config.total_proxies=len(proxies)
+    config._print(
+        f"{xColor.GREEN}[+] {xColor.CYAN}Proxy harvesting complete{xColor.WHITE} {len(proxies)} {xColor.CYAN}unique proxies loaded")
+    return proxies
+
+def init_proxy():
+    proxies = load_proxies()
+    if not proxies:
+        config._print(f"{xColor.RED}[!] {xColor.YELLOW}Note: Please add proxies to continue running the tool.")
+        config._loader_("Shutting down system", 1)
+        return [], 0
+    random.shuffle(proxies)
+    config._loader_("Optimizing proxy rotation algorithm", 1)
+    proxy_queue = Queue()
+    for proxy in proxies:
+        proxy_queue.put(proxy)
+    num_threads = min(len(proxies), 50)  # Giới hạn threads
+    config._print(f"{xColor.GREEN}[+] {xColor.CYAN}Proxy system initialized with {xColor.WHITE}{num_threads} {xColor.CYAN}endpoints")
+    return proxy_queue, num_threads
+
+def format_proxy(proxy_str):
+    if not proxy_str:
+        return None
+    try:
+        if not proxy_str.startswith(('http://', 'https://')):
+            proxy_str=f"http://{proxy_str}"
+        return {"http": proxy_str, "https": proxy_str}
+    except Exception as e:
+        config._print(
+            f"{xColor.RED}[!] {xColor.YELLOW}Proxy format error: {e}")
+        return None
+
+def get_proxy(proxy_queue, thread_id, stop_event=None):
+    try:
+        if stop_event is not None and stop_event.is_set():
+            return None
+        proxy_str=proxy_queue.get_nowait()
+        return proxy_str
+    except queue.Empty:
+        if stop_event is None or not stop_event.is_set():
+            config._print(
+                f"{xColor.RED}[Thread-{thread_id:03d}] {xColor.YELLOW}Proxy pool exhausted")
+        return None
+
+def step1b_sign_in(email, password, thread_id, proxies_dict):
+    if not email or not password:
+        config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Auth{Style.RESET_ALL}] {xColor.RED}[✗] Authentication failed: Invalid credentials")
+        return None
+    payload={
+        "email": email,
+        "password": password,
+        "clientType": "CLIENT_TYPE_IOS",
+        "returnSecureToken": True
+    }
+    vtd=config.excute(
+        f"{config.FIREBASE_AUTH_URL}/verifyPassword?key={config.FIREBASE_API_KEY}",
+        headers=config.firebase_headers_locket(),
+        payload=payload,
+        thread_id=thread_id,
+        step="Auth",
+        proxies_dict=proxies_dict
+    )
+    if vtd and 'idToken' in vtd:
+        config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Auth{Style.RESET_ALL}] {xColor.GREEN}[✓] Authentication successful")
+        return vtd.get('idToken')
+    config._print(
+        f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Auth{Style.RESET_ALL}] {xColor.RED}[✗] Authentication failed")
+    return None
+
+def step2_finalize_user(id_token, thread_id, proxies_dict):
+    if not id_token:
+        config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Profile{Style.RESET_ALL}] {xColor.RED}[✗] Profile creation failed: Invalid token")
+        return False
+    first_name=config.NAME_TOOL
+    last_name=' '.join(random.sample([
+        '😀', '😂', '😍', '🥰', '😊', '😇', '😚', '😘', '😻', '😽', '🤗',
+        '😎', '🥳', '😜', '🤩', '😢', '😡', '😴', '🙈', '🙌', '💖', '🔥', '👍',
+        '✨', '🌟', '🍎', '🍕', '🚀', '🎉', '🎈', '🌈', '🐶', '🐱', '🦁',
+        '😋', '😬', '😳', '😷', '🤓', '😈', '👻', '💪', '👏', '🙏', '💕', '💔',
+        '🌹', '🍒', '🍉', '🍔', '🍟', '☕', '🍷', '🎂', '🎁', '🎄', '🎃', '🔔',
+        '⚡', '💡', '📚', '✈️', '🚗', '🏠', '⛰️', '🌊', '☀️', '☁️', '❄️', '🌙',
+        '🐻', '🐼', '🐸', '🐝', '🦄', '🐙', '🦋', '🌸', '🌺', '🌴', '🏀', '⚽', '🎸'
+    ], 5))
+    username=_rand_name_()
+    payload={
+        "data": {
+            "username": username,
+            "last_name": last_name,
+            "require_username": True,
+            "first_name": first_name
+        }
+    }
+    headers=config.headers_locket()
+    headers['Authorization']=f"Bearer {id_token}"
+    result=config.excute(
+        f"{config.API_BASE_URL}/finalizeTemporaryUser",
+        headers=headers,
+        payload=payload,
+        thread_id=thread_id,
+        step="Profile",
+        proxies_dict=proxies_dict
+    )
+    if result:
+        config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Profile{Style.RESET_ALL}] {xColor.GREEN}[✓] Profile created: {xColor.YELLOW}{username}")
+        return True
+    config._print(
+        f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Profile{Style.RESET_ALL}] {xColor.RED}[✗] Profile creation failed")
+    return False
+
+def step3_send_friend_request(id_token, thread_id, proxies_dict):
+    if not id_token:
+        config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Friend{Style.RESET_ALL}] {xColor.RED}[✗] Connection failed: Invalid token")
+        return False
+    payload={
+        "data": {
+            "user_uid": config.TARGET_FRIEND_UID,
+            "source": "signUp",
+            "platform": "iOS",
+            "messenger": "Messages",
+            "invite_variant": {"value": "1002", "@type": "type.googleapis.com/google.protobuf.Int64Value"},
+            "share_history_eligible": True,
+            "rollcall": False,
+            "prompted_reengagement": False,
+            "create_ofr_for_temp_users": False,
+            "get_reengagement_status": False
+        }
+    }
+    headers=config.headers_locket()
+    headers['Authorization']=f"Bearer {id_token}"
+    result=config.excute(
+        f"{config.API_BASE_URL}/sendFriendRequest",
+        headers=headers,
+        payload=payload,
+        thread_id=thread_id,
+        step="Friend",
+        proxies_dict=proxies_dict
+    )
+    if result:
+        config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Friend{Style.RESET_ALL}] {xColor.GREEN}[✓] Connection established with target")
+        return True
+    config._print(
+        f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Friend{Style.RESET_ALL}] {xColor.RED}[✗] Connection failed")
+    return False
+
+def step1_create_account(thread_id, proxy_queue, stop_event):
+    while not stop_event.is_set():
+        current_proxy=get_proxy(proxy_queue, thread_id, stop_event)
+        proxies_dict=format_proxy(current_proxy)
+        proxy_usage_count=0
+        failed_attempts=0
+        max_failed_attempts=10
+        if not current_proxy:
+            config._print(
+                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.RED}[!] Proxy pool depleted, waiting for refill (1s)")
+            time.sleep(1)
+            continue
+        config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.GREEN}● Thread activated with proxy: {xColor.YELLOW}{current_proxy}")
+
+        while not stop_event.is_set() and proxy_usage_count < config.ACCOUNTS_PER_PROXY and failed_attempts < max_failed_attempts:
+            if stop_event.is_set():
+                return
+            if not current_proxy:
+                current_proxy=get_proxy(proxy_queue, thread_id, stop_event)
+                proxies_dict=format_proxy(current_proxy)
+                if not current_proxy:
+                    config._print(
+                        f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.RED}[!] Proxy unavailable, will try again")
+                    break
+                config._print(
+                    f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.GREEN}● Switching to new proxy: {xColor.YELLOW}{current_proxy}")
+
+            prefix=f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Register{Style.RESET_ALL}]"
+            email=_rand_email_()
+            password=_rand_pw_()
+            config._print(
+                f"{prefix} {xColor.CYAN}● Initializing new identity: {xColor.YELLOW}{email[:8]}...@...")
+            payload={
+                "data": {
+                    "email": email,
+                    "password": password,
+                    "client_email_verif": True,
+                    "client_token": _rand_str_(40, chars=string.hexdigits.lower()),
+                    "platform": "ios"
+                }
+            }
+            if stop_event.is_set():
+                return
+            response_data=config.excute(
+                f"{config.API_BASE_URL}/createAccountWithEmailPassword",
+                headers=config.headers_locket(),
+                payload=payload,
+                thread_id=thread_id,
+                step="Register",
+                proxies_dict=proxies_dict
+            )
+            if stop_event.is_set():
+                return
+            if response_data == "proxy_dead":
+                config._print(
+                    f"{prefix} {xColor.RED}[!] Proxy terminated, acquiring new endpoint")
+                current_proxy=None
+                failed_attempts+=1
+                continue
+            if response_data == "too_many_requests":
+                config._print(
+                    f"{prefix} {xColor.RED}[!] Connection throttled, switching endpoint")
+                current_proxy=None
+                failed_attempts+=1
+                continue
+            if isinstance(response_data, dict) and response_data.get('result', {}).get('status') == 200:
+                config._print(
+                    f"{prefix} {xColor.GREEN}[✓] Identity created: {xColor.YELLOW}{email}")
+                proxy_usage_count+=1
+                failed_attempts=0
+                if stop_event.is_set():
+                    return
+                id_token=step1b_sign_in(
+                    email, password, thread_id, proxies_dict)
+                if stop_event.is_set():
+                    return
+                if id_token:
+                    if step2_finalize_user(id_token, thread_id, proxies_dict):
+                        if stop_event.is_set():
+                            return
+                        first_request_success=step3_send_friend_request(
+                            id_token, thread_id, proxies_dict)
+                        if first_request_success:
+                            config._print(
+                                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Boost{Style.RESET_ALL}] {xColor.YELLOW}🚀 Boosting friend requests: Sending 50 more requests")
+                            for _ in range(50):
+                                if stop_event.is_set():
+                                    return
+                                step3_send_friend_request(
+                                    id_token, thread_id, proxies_dict)
+                            config._print(
+                                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Boost{Style.RESET_ALL}] {xColor.GREEN}[✓] Boost complete: 101 total requests sent")
+                    else:
+                        config._print(
+                            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Auth{Style.RESET_ALL}] {xColor.RED}[✗] Authentication failure")
+                else:
+                    config._print(
+                        f"{prefix} {xColor.RED}[✗] Identity creation failed")
+                failed_attempts+=1
+        if failed_attempts >= max_failed_attempts:
+            config._print(
+                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.RED}[!] Thread restarting: Excessive failures ({failed_attempts})")
+        else:
+            config._print(
+                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.YELLOW}● Proxy limit reached ({proxy_usage_count}/{config.ACCOUNTS_PER_PROXY}), getting new proxy")
+
+if __name__ == "__main__":
+    # Đặt Bot Token của bạn ở đây
+    BOT_TOKEN = "7875349256:AAFLKDJKuTijHWFZKzQLP315T0KtSg6NePQ"
+    YOUR_ADMIN_CHAT_ID = "1615483759"  # Thay thế bằng chat ID của bạn
+
+    config = zLocket()
+    bot = telebot.TeleBot(BOT_TOKEN)
+    
+    # Setup bot handlers after bot initialization
+    setup_bot_handlers()
+
+    print(f"🤖 Bot đã khởi động! Token: {BOT_TOKEN[:10]}...")
+    print(f"📱 Gửi /start cho bot để bắt đầu sử dụng")
+
+    try:
+        bot.polling(none_stop=True)
+    except KeyboardInterrupt:
+        print("\n⛔ Bot đã dừng!")
+        if tool_running:
+            tool_running = False
+            if stop_event:
+                stop_event.set()
