@@ -116,8 +116,8 @@ class zLocket:
         self.FIREBASE_APP_CHECK=None
         self.USE_EMOJI=True
         self.ACCOUNTS_PER_PROXY=random.randint(6,10)
-        self.NAME_TOOL="zLocket Tool Pro"
-        self.VERSION_TOOL="v1.0.7"
+        self.NAME_TOOL="zLocket Spam BIGCHANG"
+        self.VERSION_TOOL="v3.0.1"
         self.TARGET_FRIEND_UID=target_friend_uid if target_friend_uid else None
         self.PROXY_LIST=[
             # 'https://thanhdieu.com/api/list/free-proxy.txt',
@@ -557,7 +557,7 @@ def setup_bot_handlers():
     @bot.message_handler(commands=['start'])
     def start_command(message):
         welcome_text = f"""
-🔒 <b>zLocket Tool Pro - Telegram Bot</b>
+🔒 <b>zLocket Spam BIGCHANG - Telegram Bot</b>
 
 Chào mừng! Đây là bot điều khiển tool zLocket.
 
@@ -569,10 +569,10 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 /help - Hướng dẫn sử dụng
 
 <b>Ví dụ sử dụng:</b>
-<code>/spam username123 MyCustomName</code>
+<code>/spam username123</code>
 <code>/spam https://locket.cam/username123</code>
 
-<i>Phát triển bởi @{config.author if config else 'WsThanhDieu'}</i>
+<i>Phát triển bởi @{config.author if config else 'Bigchang19'}</i>
 """
 
         markup = types.InlineKeyboardMarkup()
@@ -601,7 +601,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
             return
 
         target = args[0]
-        custom_name = args[1] if len(args) > 1 else "zLocket Tool Pro"
+        custom_name = args[1] if len(args) > 1 else "zLocket Spam BIGCHANG"
 
         # Khởi tạo config nếu chưa có
         if not config:
@@ -718,7 +718,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
     @bot.message_handler(commands=['help'])
     def help_command(message):
         help_text = """
-<b>🔒 zLocket Tool Pro - Hướng dẫn sử dụng</b>
+<b>🔒 zLocket Spam BIGCHANG - Hướng dẫn sử dụng</b>
 
 <b>Các lệnh chính:</b>
 • <code>/start</code> - Menu chính
