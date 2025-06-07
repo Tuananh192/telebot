@@ -1061,7 +1061,7 @@ def step1_create_account(thread_id, proxy_queue, stop_event):
 
 if __name__ == "__main__":
     # Đặt Bot Token của bạn ở đây
-    BOT_TOKEN = "7875349256:AAGwHAOLuj6HoqF0jnd47B8Jkxm8T3B1lMk"
+    BOT_TOKEN = "6373184346:AAGexYKGtv4yzTMr5ef5y7EfO2Y1_738IBw"
     YOUR_ADMIN_CHAT_ID = "1615483759"  # Thay thế bằng chat ID của bạn
 
     config = zLocket()
