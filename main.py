@@ -572,7 +572,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 <code>/spam username123</code>
 <code>/spam https://locket.cam/username123</code>
 
-<i>Phát triển bởi @{config.author if config else 'Bigchang19'}</i>
+<i>Phát triển bởi https://t.me/BIGKER1</i>
 """
 
         markup = types.InlineKeyboardMarkup()
@@ -739,7 +739,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 • Tool sẽ tự động random emoji
 • Sử dụng /stop để dừng tool bất cứ lúc nào
 
-<b>Liên hệ:</b> @WsThanhDieu
+<b>Liên hệ:</b> @BigChang19
 """
         bot.reply_to(message, help_text, parse_mode='HTML')
 
