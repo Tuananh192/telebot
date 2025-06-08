@@ -1130,7 +1130,7 @@ def step1_create_account(thread_id, proxy_queue, stop_event):
 if __name__ == "__main__":
     # Đặt Bot Token của bạn ở đây
     BOT_TOKEN = "7602313290:AAH_tgnpd4kJTRjlKQDzS4p1E4NSbSJVQfM"
-    YOUR_ADMIN_CHAT_ID = "1615483758"  # Thay thế bằng chat ID của bạn
+    YOUR_ADMIN_CHAT_ID = "1615483759"  # Thay thế bằng chat ID của bạn
 
     config = zLocket()
     bot = telebot.TeleBot(BOT_TOKEN)
