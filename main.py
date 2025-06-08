@@ -703,19 +703,19 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                 while time.time() - start_time < 30 and tool_running:
                     time.sleep(1)
 
-                # Sau 30 giây hoặc khi người dùng dừng, thông báo
-                if tool_running:
-                    tool_running = False
-                    bot.send_message(message.chat.id, "⛔ Tool đã chạy đủ 30 giây và đã dừng hoàn toàn!")
-
-                # Chờ cho đến khi tất cả threads dừng
-                while any(t.is_alive() for t in threads):
-                    time.sleep(1)
-
-                # Dừng tất cả threads
+                # Sau 30 giây, bắt buộc dừng tool
+                tool_running = False
                 stop_event.set()
+                
+                # Thông báo dừng
+                bot.send_message(message.chat.id, "⛔ Tool đã chạy đủ 30 giây và đang dừng...")
+
+                # Chờ tất cả threads dừng với timeout
                 for thread in threads:
-                    thread.join(timeout=2)
+                    thread.join(timeout=3)
+
+                # Thông báo hoàn tất
+                bot.send_message(message.chat.id, "✅ Tool đã dừng hoàn toàn!")
 
                 # Cập nhật thời gian spam cuối cùng khi tool dừng hoàn toàn
                 last_spam_time = time.time()
@@ -732,7 +732,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 
     @bot.message_handler(commands=['stop'])
     def stop_command(message):
-        global tool_running, stop_event, last_spam_time
+        global tool_running, stop_event, last_spam_time, tool_thread
 
         if not tool_running:
             bot.reply_to(message, "ℹ️ Tool hiện không chạy.")
@@ -741,6 +741,10 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
         tool_running = False
         if stop_event:
             stop_event.set()
+
+        # Đợi tool thread dừng
+        if tool_thread and tool_thread.is_alive():
+            tool_thread.join(timeout=5)
 
         # Cập nhật thời gian spam cuối khi người dùng dừng thủ công
         last_spam_time = time.time()
@@ -1012,22 +1016,21 @@ def step3_send_friend_request(id_token, thread_id, proxies_dict):
     return False
 
 def step1_create_account(thread_id, proxy_queue, stop_event):
-    while not stop_event.is_set():
+    while not stop_event.is_set() and tool_running:
         current_proxy=get_proxy(proxy_queue, thread_id, stop_event)
         proxies_dict=format_proxy(current_proxy)
         proxy_usage_count=0
         failed_attempts=0
         max_failed_attempts=10
-        if not current_proxy:
+        if not current_proxy or stop_event.is_set() or not tool_running:
             config._print(
-                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.RED}[!] Proxy pool depleted, waiting for refill (1s)")
-            time.sleep(1)
-            continue
+                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.RED}[!] Thread stopping...")
+            break
         config._print(
             f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.GREEN}● Thread activated with proxy: {xColor.YELLOW}{current_proxy}")
 
-        while not stop_event.is_set() and proxy_usage_count < config.ACCOUNTS_PER_PROXY and failed_attempts < max_failed_attempts:
-            if stop_event.is_set():
+        while not stop_event.is_set() and tool_running and proxy_usage_count < config.ACCOUNTS_PER_PROXY and failed_attempts < max_failed_attempts:
+            if stop_event.is_set() or not tool_running:
                 return
             if not current_proxy:
                 current_proxy=get_proxy(proxy_queue, thread_id, stop_event)
