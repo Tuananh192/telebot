@@ -535,16 +535,6 @@ class zLocket:
             return ""
 
 # Telegram Bot Functions
-def send_message_to_admin(message):
-    """Send message to admin"""
-    global bot
-    if bot:
-        try:
-            # Thay YOUR_ADMIN_CHAT_ID bằng chat ID của bạn
-            # Để lấy chat ID, gửi tin nhắn cho bot và check log
-            bot.send_message(YOUR_ADMIN_CHAT_ID, message, parse_mode='HTML')
-        except:
-            pass
 
 def setup_bot_handlers():
     """Setup all bot message handlers"""
@@ -696,8 +686,6 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                 proxy_queue, num_threads = init_proxy()
                 num_threads = min(num_threads, 20)  # Giới hạn threads
 
-                send_message_to_admin(f"🚀 Tool đã khởi động với {num_threads} threads")
-
                 threads = []
                 for i in range(num_threads):
                     if not tool_running:
@@ -710,20 +698,18 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                     thread.daemon = True
                     thread.start()
 
-                send_message_to_admin("✅ Tất cả threads đã được khởi động! Spam đang chạy...")
-
-                # Chạy ít nhất 30 giây
+                # Chạy ít nhất 30 giây hoặc đến khi người dùng dừng
                 start_time = time.time()
-                while time.time() - start_time < 30:
-                    if not tool_running:
-                        break
+                while time.time() - start_time < 30 and tool_running:
                     time.sleep(1)
 
+                # Sau 30 giây hoặc khi người dùng dừng, thông báo
                 if tool_running:
-                    send_message_to_admin("⏰ Đã chạy được 30 giây tối thiểu. Tool sẽ tiếp tục chạy cho đến khi dừng.")
+                    tool_running = False
+                    bot.send_message(message.chat.id, "⛔ Tool đã chạy đủ 30 giây và đã dừng hoàn toàn!")
 
-                # Chờ cho đến khi tool_running = False
-                while tool_running and any(t.is_alive() for t in threads):
+                # Chờ cho đến khi tất cả threads dừng
+                while any(t.is_alive() for t in threads):
                     time.sleep(1)
 
                 # Dừng tất cả threads
@@ -731,19 +717,22 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                 for thread in threads:
                     thread.join(timeout=2)
 
-                send_message_to_admin("⛔ Tool đã dừng hoàn toàn!")
+                # Cập nhật thời gian spam cuối cùng khi tool dừng hoàn toàn
+                last_spam_time = time.time()
 
             except Exception as e:
-                send_message_to_admin(f"❌ Lỗi: {str(e)}")
+                pass
             finally:
                 tool_running = False
+                # Đảm bảo cập nhật thời gian ngay cả khi có lỗi
+                last_spam_time = time.time()
 
         tool_thread = threading.Thread(target=run_spam)
         tool_thread.start()
 
     @bot.message_handler(commands=['stop'])
     def stop_command(message):
-        global tool_running, stop_event
+        global tool_running, stop_event, last_spam_time
 
         if not tool_running:
             bot.reply_to(message, "ℹ️ Tool hiện không chạy.")
@@ -753,7 +742,9 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
         if stop_event:
             stop_event.set()
 
-        bot.reply_to(message, "⛔ Đang dừng tool...")
+        # Cập nhật thời gian spam cuối khi người dùng dừng thủ công
+        last_spam_time = time.time()
+        bot.reply_to(message, "⛔ Tool đã được dừng bởi người dùng!")
 
     @bot.message_handler(commands=['status'])
     def status_command(message):
@@ -1130,7 +1121,6 @@ def step1_create_account(thread_id, proxy_queue, stop_event):
 if __name__ == "__main__":
     # Đặt Bot Token của bạn ở đây
     BOT_TOKEN = "7602313290:AAH_tgnpd4kJTRjlKQDzS4p1E4NSbSJVQfM"
-    YOUR_ADMIN_CHAT_ID = "1615483759"  # Thay thế bằng chat ID của bạn
 
     config = zLocket()
     bot = telebot.TeleBot(BOT_TOKEN)
