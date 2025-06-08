@@ -670,7 +670,8 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
         config.NAME_TOOL = custom_name
         config.USE_EMOJI = True
 
-        bot.reply_to(message, f"✅ Đã cấu hình thành công!\n\n🎯 Target UID: <code>{uid}</code>\n👤 Custom Name: <code>{custom_name}</code>\n\n🚀 Đang khởi động tool...", parse_mode='HTML')
+        # Gửi thông báo khởi động
+        init_msg = bot.reply_to(message, f"✅ Đã cấu hình thành công!\n\n🎯 Target UID: <code>{uid}</code>\n👤 Custom Name: <code>{custom_name}</code>\n\n🚀 Đang khởi động tool...", parse_mode='HTML')
 
         # Cập nhật thời gian spam cuối
         last_spam_time = current_time
@@ -678,6 +679,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
         # Bắt đầu spam thread với timeout 30 giây
         def run_spam():
             global tool_running, stop_event, last_spam_time
+            status_msg = None
             try:
                 tool_running = True
                 stop_event = threading.Event()
@@ -685,6 +687,10 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                 # Khởi tạo proxy
                 proxy_queue, num_threads = init_proxy()
                 num_threads = min(num_threads, 20)  # Giới hạn threads
+
+                # Gửi trạng thái ban đầu
+                status_text = f"🟢 <b>Tool đang chạy</b>\n\n⏱️ Runtime: <code>00:00:00</code>\n✅ Success: <code>0</code>\n❌ Failed: <code>0</code>\n📊 Success Rate: <code>0.0%</code>\n🧵 Threads: <code>{num_threads}</code>\n🎯 Target: <code>{config.TARGET_FRIEND_UID}</code>\n👤 Name: <code>{config.NAME_TOOL}</code>"
+                status_msg = bot.send_message(message.chat.id, status_text, parse_mode='HTML')
 
                 threads = []
                 for i in range(num_threads):
@@ -698,14 +704,59 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                     thread.daemon = True
                     thread.start()
 
-                # Chạy ít nhất 30 giây hoặc đến khi người dùng dừng
+                # Chạy ít nhất 30 giây và cập nhật trạng thái mỗi 3 giây
                 start_time = time.time()
+                last_update = 0
+                
                 while time.time() - start_time < 30 and tool_running:
+                    current_runtime = time.time() - start_time
+                    
+                    # Cập nhật trạng thái mỗi 3 giây
+                    if current_runtime - last_update >= 3:
+                        try:
+                            elapsed = int(current_runtime)
+                            hours, remainder = divmod(elapsed, 3600)
+                            minutes, seconds = divmod(remainder, 60)
+                            success_rate = (config.successful_requests / (config.successful_requests + config.failed_requests)) * 100 if (config.successful_requests + config.failed_requests) > 0 else 0
+                            
+                            remaining_time = max(0, 30 - elapsed)
+                            rem_minutes, rem_seconds = divmod(remaining_time, 60)
+
+                            status_text = f"🟢 <b>Tool đang chạy</b>\n\n⏱️ Runtime: <code>{hours:02d}:{minutes:02d}:{seconds:02d}</code>\n⏳ Remaining: <code>{rem_minutes:02d}:{rem_seconds:02d}</code>\n✅ Success: <code>{config.successful_requests}</code>\n❌ Failed: <code>{config.failed_requests}</code>\n📊 Success Rate: <code>{success_rate:.1f}%</code>\n🧵 Threads: <code>{num_threads}</code>\n🎯 Target: <code>{config.TARGET_FRIEND_UID}</code>\n👤 Name: <code>{config.NAME_TOOL}</code>"
+                            
+                            bot.edit_message_text(
+                                chat_id=status_msg.chat.id,
+                                message_id=status_msg.message_id,
+                                text=status_text,
+                                parse_mode='HTML'
+                            )
+                            last_update = current_runtime
+                        except Exception:
+                            pass  # Ignore edit errors
+                    
                     time.sleep(1)
 
                 # Sau 30 giây, bắt buộc dừng tool
                 tool_running = False
                 stop_event.set()
+                
+                # Cập nhật trạng thái cuối cùng
+                try:
+                    elapsed = 30
+                    hours, remainder = divmod(elapsed, 3600)
+                    minutes, seconds = divmod(remainder, 60)
+                    success_rate = (config.successful_requests / (config.successful_requests + config.failed_requests)) * 100 if (config.successful_requests + config.failed_requests) > 0 else 0
+
+                    final_status = f"🔴 <b>Tool đã dừng</b>\n\n⏱️ Total Runtime: <code>{hours:02d}:{minutes:02d}:{seconds:02d}</code>\n✅ Total Success: <code>{config.successful_requests}</code>\n❌ Total Failed: <code>{config.failed_requests}</code>\n📊 Success Rate: <code>{success_rate:.1f}%</code>\n🧵 Threads: <code>{num_threads}</code>\n🎯 Target: <code>{config.TARGET_FRIEND_UID}</code>\n👤 Name: <code>{config.NAME_TOOL}</code>"
+                    
+                    bot.edit_message_text(
+                        chat_id=status_msg.chat.id,
+                        message_id=status_msg.message_id,
+                        text=final_status,
+                        parse_mode='HTML'
+                    )
+                except Exception:
+                    pass
                 
                 # Thông báo dừng
                 bot.send_message(message.chat.id, "⛔ Tool đã chạy đủ 30 giây và đang dừng...")
@@ -721,7 +772,16 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                 last_spam_time = time.time()
 
             except Exception as e:
-                pass
+                if status_msg:
+                    try:
+                        bot.edit_message_text(
+                            chat_id=status_msg.chat.id,
+                            message_id=status_msg.message_id,
+                            text="❌ <b>Tool gặp lỗi và đã dừng</b>",
+                            parse_mode='HTML'
+                        )
+                    except Exception:
+                        pass
             finally:
                 tool_running = False
                 # Đảm bảo cập nhật thời gian ngay cả khi có lỗi
