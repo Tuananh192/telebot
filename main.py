@@ -1,10 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-# Telegram: @wus_team
-# Version: 1.0.7 (Telegram Bot)
-# Github: https://github.com/wusthanhdieu
-# Description: zLocket Tool Open Source - Telegram Bot Version
-
 import sys
 import subprocess
 def _install_():
@@ -36,7 +29,7 @@ def _install_():
         print(
             f"{Fore.YELLOW}[!] Bạn chưa có thư viện: {Fore.RED}{', '.join(_pkgs)}{Style.RESET_ALL}")
         print(f"{Fore.CYAN}{'=' * 50}{Style.RESET_ALL}")
-        
+
         print(f"{Fore.BLUE}[*] Đang cài đặt thư viện...{Style.RESET_ALL}")
         try:
             subprocess.check_call(
@@ -101,6 +94,8 @@ tool_running = False
 tool_thread = None
 stop_event = None
 config = None
+last_spam_time = 0
+user_states = {}  # Lưu trạng thái của từng user
 
 class zLocket:
     def __init__(self, device_token: str="", target_friend_uid: str="", num_threads: int=1, note_target: str=""):
@@ -553,7 +548,7 @@ def send_message_to_admin(message):
 
 def setup_bot_handlers():
     """Setup all bot message handlers"""
-    
+
     @bot.message_handler(commands=['start'])
     def start_command(message):
         welcome_text = f"""
@@ -563,7 +558,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 
 <b>Các lệnh có sẵn:</b>
 /start - Hiển thị menu chính
-/spam [target] [custom_name] - Bắt đầu spam
+/spam - Bắt đầu spam
 /stop - Dừng spam
 /status - Kiểm tra trạng thái
 /help - Hướng dẫn sử dụng
@@ -571,6 +566,10 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 <b>Ví dụ sử dụng:</b>
 <code>/spam username123</code>
 <code>/spam https://locket.cam/username123</code>
+
+<b>Tính năng:</b>
+• Tool chạy tối thiểu 30 giây mỗi lần
+• Cooldown 1 phút giữa các lần spam
 
 <i>Phát triển bởi https://t.me/BIGKER1</i>
 """
@@ -589,7 +588,18 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 
     @bot.message_handler(commands=['spam'])
     def spam_command(message):
-        global tool_running, tool_thread, config, stop_event
+        global tool_running, tool_thread, config, stop_event, last_spam_time, user_states
+
+        user_id = message.from_user.id
+        current_time = time.time()
+
+        # Kiểm tra cooldown
+        if last_spam_time > 0:
+            time_since_last = current_time - last_spam_time
+            if time_since_last < 60:  # 1 phút cooldown
+                remaining = int(60 - time_since_last)
+                bot.reply_to(message, f"⏰ Vui lòng đợi {remaining} giây nữa để có thể spam tiếp!")
+                return
 
         if tool_running:
             bot.reply_to(message, "❌ Tool đang chạy! Sử dụng /stop để dừng trước.")
@@ -597,11 +607,51 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 
         args = message.text.split()[1:]
         if len(args) < 1:
-            bot.reply_to(message, "❌ Thiếu tham số!\n\nSử dụng: /spam [target] [custom_name]\nVí dụ: /spam username123 MyName")
+            bot.reply_to(message, "❌ Thiếu tham số!\n\nSử dụng: /spam [target]\nVí dụ: /spam username123")
             return
 
         target = args[0]
-        custom_name = args[1] if len(args) > 1 else "zLocket Spam BIGCHANG"
+
+        # Lưu target vào user state và yêu cầu nhập tên
+        user_states[user_id] = {
+            'step': 'waiting_for_name',
+            'target': target,
+            'timestamp': current_time
+        }
+
+        markup = types.ForceReply(selective=False)
+        bot.reply_to(message, f"🎯 Target: <code>{target}</code>\n\n👤 Vui lòng nhập tên tùy ý cho spam (hoặc gửi 'default' để dùng tên mặc định):", 
+                    parse_mode='HTML', reply_markup=markup)
+
+    @bot.message_handler(func=lambda message: message.from_user.id in user_states and user_states[message.from_user.id].get('step') == 'waiting_for_name')
+    def handle_custom_name(message):
+        global tool_running, tool_thread, config, stop_event, last_spam_time, user_states
+
+        user_id = message.from_user.id
+        current_time = time.time()
+
+        if user_id not in user_states:
+            return
+
+        user_state = user_states[user_id]
+        target = user_state['target']
+        
+        # Kiểm tra timeout (5 phút)
+        if current_time - user_state['timestamp'] > 300:
+            del user_states[user_id]
+            bot.reply_to(message, "⏰ Hết thời gian chờ. Vui lòng sử dụng lại lệnh /spam")
+            return
+
+        # Lấy tên từ tin nhắn
+        custom_name = message.text.strip()
+        if custom_name.lower() == 'default' or not custom_name:
+            custom_name = "zLocket Spam BIGCHANG"
+        elif len(custom_name) > 30:
+            bot.reply_to(message, "❌ Tên quá dài! Vui lòng nhập tên dưới 30 ký tự.")
+            return
+
+        # Xóa user state
+        del user_states[user_id]
 
         # Khởi tạo config nếu chưa có
         if not config:
@@ -632,9 +682,12 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 
         bot.reply_to(message, f"✅ Đã cấu hình thành công!\n\n🎯 Target UID: <code>{uid}</code>\n👤 Custom Name: <code>{custom_name}</code>\n\n🚀 Đang khởi động tool...", parse_mode='HTML')
 
-        # Bắt đầu spam thread
+        # Cập nhật thời gian spam cuối
+        last_spam_time = current_time
+
+        # Bắt đầu spam thread với timeout 30 giây
         def run_spam():
-            global tool_running, stop_event
+            global tool_running, stop_event, last_spam_time
             try:
                 tool_running = True
                 stop_event = threading.Event()
@@ -658,6 +711,16 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                     thread.start()
 
                 send_message_to_admin("✅ Tất cả threads đã được khởi động! Spam đang chạy...")
+
+                # Chạy ít nhất 30 giây
+                start_time = time.time()
+                while time.time() - start_time < 30:
+                    if not tool_running:
+                        break
+                    time.sleep(1)
+
+                if tool_running:
+                    send_message_to_admin("⏰ Đã chạy được 30 giây tối thiểu. Tool sẽ tiếp tục chạy cho đến khi dừng.")
 
                 # Chờ cho đến khi tool_running = False
                 while tool_running and any(t.is_alive() for t in threads):
@@ -722,22 +785,27 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 
 <b>Các lệnh chính:</b>
 • <code>/start</code> - Menu chính
-• <code>/spam [target] [custom_name]</code> - Bắt đầu spam
+• <code>/spam [target]</code> - Bắt đầu spam
 • <code>/stop</code> - Dừng spam
 • <code>/status</code> - Kiểm tra trạng thái
 • <code>/help</code> - Hướng dẫn này
 
 <b>Cách sử dụng lệnh /spam:</b>
 <code>/spam username123</code>
-<code>/spam username123 MyCustomName</code>
 <code>/spam https://locket.cam/username123</code>
-<code>/spam https://locket.cam/username123 MyName</code>
+
+<b>Quy trình spam:</b>
+1. Gửi lệnh <code>/spam [target]</code>
+2. Bot sẽ yêu cầu nhập tên tùy ý
+3. Nhập tên hoặc gửi "default" để dùng tên mặc định
+4. Tool sẽ chạy tối thiểu 30 giây
 
 <b>Lưu ý:</b>
 • Target có thể là username hoặc link đầy đủ
-• Custom name tối đa 20 ký tự (tùy chọn)
+• Custom name tối đa 30 ký tự
+• Cooldown 1 phút giữa các lần spam
+• Tool chạy tối thiểu 30 giây mỗi lần
 • Tool sẽ tự động random emoji
-• Sử dụng /stop để dừng tool bất cứ lúc nào
 
 <b>Liên hệ:</b> @BigChang19
 """
@@ -746,7 +814,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
     @bot.callback_query_handler(func=lambda call: True)
     def callback_query(call):
         if call.data == "start_spam":
-            bot.send_message(call.message.chat.id, "🚀 Để bắt đầu spam, sử dụng lệnh:\n\n<code>/spam [target] [custom_name]</code>\n\nVí dụ:\n<code>/spam username123 MyName</code>", parse_mode='HTML')
+            bot.send_message(call.message.chat.id, "🚀 Để bắt đầu spam, sử dụng lệnh:\n\n<code>/spam [target]</code>\n\nVí dụ:\n<code>/spam username123</code>\n\nBot sẽ hỏi tên tùy ý sau đó!", parse_mode='HTML')
         elif call.data == "stop_spam":
             stop_command(call.message)
         elif call.data == "status":
@@ -1061,12 +1129,12 @@ def step1_create_account(thread_id, proxy_queue, stop_event):
 
 if __name__ == "__main__":
     # Đặt Bot Token của bạn ở đây
-    BOT_TOKEN = "6373184346:AAGexYKGtv4yzTMr5ef5y7EfO2Y1_738IBw"
-    YOUR_ADMIN_CHAT_ID = "1615483759"  # Thay thế bằng chat ID của bạn
+    BOT_TOKEN = "7602313290:AAH_tgnpd4kJTRjlKQDzS4p1E4NSbSJVQfM"
+    YOUR_ADMIN_CHAT_ID = "1615483758"  # Thay thế bằng chat ID của bạn
 
     config = zLocket()
     bot = telebot.TeleBot(BOT_TOKEN)
-    
+
     # Setup bot handlers after bot initialization
     setup_bot_handlers()
 
