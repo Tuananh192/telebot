@@ -589,7 +589,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 <code>/spam https://locket.cam/username123</code>
 
 <b>Tính năng:</b>
-• Tool chạy tối thiểu 30 giây mỗi lần
+• Tool chạy tối thiểu 5 phút mỗi lần
 • Cooldown 1 phút giữa các lần spam
 
 <i>Phát triển bởi https://t.me/BIGKER1</i>
@@ -734,11 +734,11 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                     thread.daemon = True
                     thread.start()
 
-                # Chạy ít nhất 30 giây và cập nhật trạng thái mỗi 3 giây
+                # Chạy ít nhất 5 phút và cập nhật trạng thái mỗi 3 giây
                 start_time = time.time()
                 last_update = 0
 
-                while time.time() - start_time < 30 and is_user_tool_running(user_id):
+                while time.time() - start_time < 300 and is_user_tool_running(user_id):
                     current_runtime = time.time() - start_time
 
                     # Cập nhật trạng thái mỗi 3 giây
@@ -749,7 +749,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                             minutes, seconds = divmod(remainder, 60)
                             success_rate = (user_config.successful_requests / (user_config.successful_requests + user_config.failed_requests)) * 100 if (user_config.successful_requests + user_config.failed_requests) > 0 else 0
 
-                            remaining_time = max(0, 30 - elapsed)
+                            remaining_time = max(0, 300 - elapsed)
                             rem_minutes, rem_seconds = divmod(remaining_time, 60)
 
                             status_text = f"🟢 <b>Tool đang chạy (User: {user_id})</b>\n\n⏱️ Runtime: <code>{hours:02d}:{minutes:02d}:{seconds:02d}</code>\n⏳ Remaining: <code>{rem_minutes:02d}:{rem_seconds:02d}</code>\n✅ Success: <code>{user_config.successful_requests}</code>\n❌ Failed: <code>{user_config.failed_requests}</code>\n📊 Success Rate: <code>{success_rate:.1f}%</code>\n🧵 Threads: <code>{num_threads}</code>\n🎯 Target: <code>{user_config.TARGET_FRIEND_UID}</code>\n👤 Name: <code>{user_config.NAME_TOOL}</code>"
@@ -766,13 +766,13 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 
                     time.sleep(1)
 
-                # Sau 30 giây, bắt buộc dừng tool
+                # Sau 5 phút, bắt buộc dừng tool
                 set_user_tool_running(user_id, False)
                 user_stop_event.set()
 
                 # Cập nhật trạng thái cuối cùng
                 try:
-                    elapsed = 30
+                    elapsed = 300
                     hours, remainder = divmod(elapsed, 3600)
                     minutes, seconds = divmod(remainder, 60)
                     success_rate = (user_config.successful_requests / (user_config.successful_requests + user_config.failed_requests)) * 100 if (user_config.successful_requests + user_config.failed_requests) > 0 else 0
@@ -789,7 +789,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                     pass
 
                 # Thông báo dừng
-                bot.send_message(message.chat.id, "⛔ Tool đã chạy đủ 30 giây và đang dừng...")
+                bot.send_message(message.chat.id, "⛔ Tool đã chạy đủ 5 phút và đang dừng...")
 
                 # Chờ tất cả threads dừng với timeout
                 for thread in threads:
@@ -892,7 +892,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 • Target có thể là username hoặc link đầy đủ
 • Custom name tối đa 30 ký tự
 • Cooldown 1 phút giữa các lần spam
-• Tool chạy tối thiểu 30 giây mỗi lần
+• Tool chạy tối thiểu 5 phút mỗi lần
 • Tool sẽ tự động random emoji
 
 <b>Liên hệ:</b> @BigChang19
