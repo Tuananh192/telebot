@@ -90,12 +90,43 @@ class xColor:
 
 # Global variables for Telegram Bot
 bot = None
-tool_running = False
-tool_thread = None
-stop_event = None
-config = None
-last_spam_time = 0
+user_sessions = {}  # Lưu session của từng user: {user_id: {tool_running, tool_thread, stop_event, config, last_spam_time}}
 user_states = {}  # Lưu trạng thái của từng user
+session_lock = threading.Lock()  # Lock để đảm bảo thread-safe khi thao tác với user_sessions
+
+# Helper functions for user session management
+def get_user_session(user_id):
+    """Lấy session của user, tạo mới nếu chưa có"""
+    with session_lock:
+        if user_id not in user_sessions:
+            user_sessions[user_id] = {
+                'tool_running': False,
+                'tool_thread': None,
+                'stop_event': None,
+                'config': None,
+                'last_spam_time': 0
+            }
+        return user_sessions[user_id]
+
+def cleanup_user_session(user_id):
+    """Dọn dẹp session của user khi tool dừng"""
+    with session_lock:
+        if user_id in user_sessions:
+            session = user_sessions[user_id]
+            session['tool_running'] = False
+            session['tool_thread'] = None
+            session['stop_event'] = None
+            # Giữ lại config và last_spam_time
+
+def is_user_tool_running(user_id):
+    """Kiểm tra xem tool của user có đang chạy không"""
+    session = get_user_session(user_id)
+    return session['tool_running']
+
+def set_user_tool_running(user_id, running):
+    """Đặt trạng thái tool của user"""
+    session = get_user_session(user_id)
+    session['tool_running'] = running
 
 class zLocket:
     def __init__(self, device_token: str="", target_friend_uid: str="", num_threads: int=1, note_target: str=""):
@@ -578,21 +609,20 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 
     @bot.message_handler(commands=['spam'])
     def spam_command(message):
-        global tool_running, tool_thread, config, stop_event, last_spam_time, user_states
-
         user_id = message.from_user.id
         current_time = time.time()
+        user_session = get_user_session(user_id)
 
-        # Kiểm tra cooldown
-        if last_spam_time > 0:
-            time_since_last = current_time - last_spam_time
+        # Kiểm tra cooldown cho user này
+        if user_session['last_spam_time'] > 0:
+            time_since_last = current_time - user_session['last_spam_time']
             if time_since_last < 60:  # 1 phút cooldown
                 remaining = int(60 - time_since_last)
                 bot.reply_to(message, f"⏰ Vui lòng đợi {remaining} giây nữa để có thể spam tiếp!")
                 return
 
-        if tool_running:
-            bot.reply_to(message, "❌ Tool đang chạy! Sử dụng /stop để dừng trước.")
+        if is_user_tool_running(user_id):
+            bot.reply_to(message, "❌ Tool của bạn đang chạy! Sử dụng /stop để dừng trước.")
             return
 
         args = message.text.split()[1:]
@@ -615,17 +645,16 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 
     @bot.message_handler(func=lambda message: message.from_user.id in user_states and user_states[message.from_user.id].get('step') == 'waiting_for_name')
     def handle_custom_name(message):
-        global tool_running, tool_thread, config, stop_event, last_spam_time, user_states
-
         user_id = message.from_user.id
         current_time = time.time()
+        user_session = get_user_session(user_id)
 
         if user_id not in user_states:
             return
 
         user_state = user_states[user_id]
         target = user_state['target']
-        
+
         # Kiểm tra timeout (5 phút)
         if current_time - user_state['timestamp'] > 300:
             del user_states[user_id]
@@ -643,9 +672,9 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
         # Xóa user state
         del user_states[user_id]
 
-        # Khởi tạo config nếu chưa có
-        if not config:
-            config = zLocket()
+        # Khởi tạo config cho user này
+        if not user_session['config']:
+            user_session['config'] = zLocket()
 
         # Xử lý target URL
         url = target.strip()
@@ -655,50 +684,51 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
             url = f"https://{url}"
 
         # Extract UID
-        config.messages = []
-        uid = config._extract_uid_locket(url)
+        user_config = user_session['config']
+        user_config.messages = []
+        uid = user_config._extract_uid_locket(url)
 
         if not uid:
             error_msg = "❌ Không thể lấy UID từ target:\n"
-            for msg in config.messages:
+            for msg in user_config.messages:
                 error_msg += f"• {msg}\n"
             bot.reply_to(message, error_msg)
             return
 
-        # Cấu hình
-        config.TARGET_FRIEND_UID = uid
-        config.NAME_TOOL = custom_name
-        config.USE_EMOJI = True
+        # Cấu hình cho user này
+        user_config.TARGET_FRIEND_UID = uid
+        user_config.NAME_TOOL = custom_name
+        user_config.USE_EMOJI = True
 
         # Gửi thông báo khởi động
         init_msg = bot.reply_to(message, f"✅ Đã cấu hình thành công!\n\n🎯 Target UID: <code>{uid}</code>\n👤 Custom Name: <code>{custom_name}</code>\n\n🚀 Đang khởi động tool...", parse_mode='HTML')
 
-        # Cập nhật thời gian spam cuối
-        last_spam_time = current_time
+        # Cập nhật thời gian spam cuối cho user này
+        user_session['last_spam_time'] = current_time
 
         # Bắt đầu spam thread với timeout 30 giây
         def run_spam():
-            global tool_running, stop_event, last_spam_time
             status_msg = None
             try:
-                tool_running = True
-                stop_event = threading.Event()
+                set_user_tool_running(user_id, True)
+                user_session['stop_event'] = threading.Event()
+                user_stop_event = user_session['stop_event']
 
-                # Khởi tạo proxy
-                proxy_queue, num_threads = init_proxy()
+                # Khởi tạo proxy cho user này
+                proxy_queue, num_threads = init_proxy_for_user(user_config)
                 num_threads = min(num_threads, 20)  # Giới hạn threads
 
                 # Gửi trạng thái ban đầu
-                status_text = f"🟢 <b>Tool đang chạy</b>\n\n⏱️ Runtime: <code>00:00:00</code>\n✅ Success: <code>0</code>\n❌ Failed: <code>0</code>\n📊 Success Rate: <code>0.0%</code>\n🧵 Threads: <code>{num_threads}</code>\n🎯 Target: <code>{config.TARGET_FRIEND_UID}</code>\n👤 Name: <code>{config.NAME_TOOL}</code>"
+                status_text = f"🟢 <b>Tool đang chạy (User: {user_id})</b>\n\n⏱️ Runtime: <code>00:00:00</code>\n✅ Success: <code>0</code>\n❌ Failed: <code>0</code>\n📊 Success Rate: <code>0.0%</code>\n🧵 Threads: <code>{num_threads}</code>\n🎯 Target: <code>{user_config.TARGET_FRIEND_UID}</code>\n👤 Name: <code>{user_config.NAME_TOOL}</code>"
                 status_msg = bot.send_message(message.chat.id, status_text, parse_mode='HTML')
 
                 threads = []
                 for i in range(num_threads):
-                    if not tool_running:
+                    if not is_user_tool_running(user_id):
                         break
                     thread = threading.Thread(
-                        target=step1_create_account,
-                        args=(i, proxy_queue, stop_event)
+                        target=step1_create_account_for_user,
+                        args=(i, proxy_queue, user_stop_event, user_config)
                     )
                     threads.append(thread)
                     thread.daemon = True
@@ -707,23 +737,23 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                 # Chạy ít nhất 30 giây và cập nhật trạng thái mỗi 3 giây
                 start_time = time.time()
                 last_update = 0
-                
-                while time.time() - start_time < 30 and tool_running:
+
+                while time.time() - start_time < 30 and is_user_tool_running(user_id):
                     current_runtime = time.time() - start_time
-                    
+
                     # Cập nhật trạng thái mỗi 3 giây
                     if current_runtime - last_update >= 3:
                         try:
                             elapsed = int(current_runtime)
                             hours, remainder = divmod(elapsed, 3600)
                             minutes, seconds = divmod(remainder, 60)
-                            success_rate = (config.successful_requests / (config.successful_requests + config.failed_requests)) * 100 if (config.successful_requests + config.failed_requests) > 0 else 0
-                            
+                            success_rate = (user_config.successful_requests / (user_config.successful_requests + user_config.failed_requests)) * 100 if (user_config.successful_requests + user_config.failed_requests) > 0 else 0
+
                             remaining_time = max(0, 30 - elapsed)
                             rem_minutes, rem_seconds = divmod(remaining_time, 60)
 
-                            status_text = f"🟢 <b>Tool đang chạy</b>\n\n⏱️ Runtime: <code>{hours:02d}:{minutes:02d}:{seconds:02d}</code>\n⏳ Remaining: <code>{rem_minutes:02d}:{rem_seconds:02d}</code>\n✅ Success: <code>{config.successful_requests}</code>\n❌ Failed: <code>{config.failed_requests}</code>\n📊 Success Rate: <code>{success_rate:.1f}%</code>\n🧵 Threads: <code>{num_threads}</code>\n🎯 Target: <code>{config.TARGET_FRIEND_UID}</code>\n👤 Name: <code>{config.NAME_TOOL}</code>"
-                            
+                            status_text = f"🟢 <b>Tool đang chạy (User: {user_id})</b>\n\n⏱️ Runtime: <code>{hours:02d}:{minutes:02d}:{seconds:02d}</code>\n⏳ Remaining: <code>{rem_minutes:02d}:{rem_seconds:02d}</code>\n✅ Success: <code>{user_config.successful_requests}</code>\n❌ Failed: <code>{user_config.failed_requests}</code>\n📊 Success Rate: <code>{success_rate:.1f}%</code>\n🧵 Threads: <code>{num_threads}</code>\n🎯 Target: <code>{user_config.TARGET_FRIEND_UID}</code>\n👤 Name: <code>{user_config.NAME_TOOL}</code>"
+
                             bot.edit_message_text(
                                 chat_id=status_msg.chat.id,
                                 message_id=status_msg.message_id,
@@ -733,22 +763,22 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                             last_update = current_runtime
                         except Exception:
                             pass  # Ignore edit errors
-                    
+
                     time.sleep(1)
 
                 # Sau 30 giây, bắt buộc dừng tool
-                tool_running = False
-                stop_event.set()
-                
+                set_user_tool_running(user_id, False)
+                user_stop_event.set()
+
                 # Cập nhật trạng thái cuối cùng
                 try:
                     elapsed = 30
                     hours, remainder = divmod(elapsed, 3600)
                     minutes, seconds = divmod(remainder, 60)
-                    success_rate = (config.successful_requests / (config.successful_requests + config.failed_requests)) * 100 if (config.successful_requests + config.failed_requests) > 0 else 0
+                    success_rate = (user_config.successful_requests / (user_config.successful_requests + user_config.failed_requests)) * 100 if (user_config.successful_requests + user_config.failed_requests) > 0 else 0
 
-                    final_status = f"🔴 <b>Tool đã dừng</b>\n\n⏱️ Total Runtime: <code>{hours:02d}:{minutes:02d}:{seconds:02d}</code>\n✅ Total Success: <code>{config.successful_requests}</code>\n❌ Total Failed: <code>{config.failed_requests}</code>\n📊 Success Rate: <code>{success_rate:.1f}%</code>\n🧵 Threads: <code>{num_threads}</code>\n🎯 Target: <code>{config.TARGET_FRIEND_UID}</code>\n👤 Name: <code>{config.NAME_TOOL}</code>"
-                    
+                    final_status = f"🔴 <b>Tool đã dừng (User: {user_id})</b>\n\n⏱️ Total Runtime: <code>{hours:02d}:{minutes:02d}:{seconds:02d}</code>\n✅ Total Success: <code>{user_config.successful_requests}</code>\n❌ Total Failed: <code>{user_config.failed_requests}</code>\n📊 Success Rate: <code>{success_rate:.1f}%</code>\n🧵 Threads: <code>{num_threads}</code>\n🎯 Target: <code>{user_config.TARGET_FRIEND_UID}</code>\n👤 Name: <code>{user_config.NAME_TOOL}</code>"
+
                     bot.edit_message_text(
                         chat_id=status_msg.chat.id,
                         message_id=status_msg.message_id,
@@ -757,7 +787,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                     )
                 except Exception:
                     pass
-                
+
                 # Thông báo dừng
                 bot.send_message(message.chat.id, "⛔ Tool đã chạy đủ 30 giây và đang dừng...")
 
@@ -769,7 +799,7 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                 bot.send_message(message.chat.id, "✅ Tool đã dừng hoàn toàn!")
 
                 # Cập nhật thời gian spam cuối cùng khi tool dừng hoàn toàn
-                last_spam_time = time.time()
+                user_session['last_spam_time'] = time.time()
 
             except Exception as e:
                 if status_msg:
@@ -777,59 +807,62 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
                         bot.edit_message_text(
                             chat_id=status_msg.chat.id,
                             message_id=status_msg.message_id,
-                            text="❌ <b>Tool gặp lỗi và đã dừng</b>",
+                            text=f"❌ <b>Tool gặp lỗi và đã dừng (User: {user_id})</b>",
                             parse_mode='HTML'
                         )
                     except Exception:
                         pass
             finally:
-                tool_running = False
+                cleanup_user_session(user_id)
                 # Đảm bảo cập nhật thời gian ngay cả khi có lỗi
-                last_spam_time = time.time()
+                user_session['last_spam_time'] = time.time()
 
-        tool_thread = threading.Thread(target=run_spam)
-        tool_thread.start()
+        user_session['tool_thread'] = threading.Thread(target=run_spam)
+        user_session['tool_thread'].start()
 
     @bot.message_handler(commands=['stop'])
     def stop_command(message):
-        global tool_running, stop_event, last_spam_time, tool_thread
+        user_id = message.from_user.id
+        user_session = get_user_session(user_id)
 
-        if not tool_running:
-            bot.reply_to(message, "ℹ️ Tool hiện không chạy.")
+        if not is_user_tool_running(user_id):
+            bot.reply_to(message, "ℹ️ Tool của bạn hiện không chạy.")
             return
 
-        tool_running = False
-        if stop_event:
-            stop_event.set()
+        set_user_tool_running(user_id, False)
+        if user_session['stop_event']:
+            user_session['stop_event'].set()
 
         # Đợi tool thread dừng
-        if tool_thread and tool_thread.is_alive():
-            tool_thread.join(timeout=5)
+        if user_session['tool_thread'] and user_session['tool_thread'].is_alive():
+            user_session['tool_thread'].join(timeout=5)
 
         # Cập nhật thời gian spam cuối khi người dùng dừng thủ công
-        last_spam_time = time.time()
-        bot.reply_to(message, "⛔ Tool đã được dừng bởi người dùng!")
+        user_session['last_spam_time'] = time.time()
+        cleanup_user_session(user_id)
+        bot.reply_to(message, "⛔ Tool của bạn đã được dừng!")
 
     @bot.message_handler(commands=['status'])
     def status_command(message):
-        global tool_running, config
+        user_id = message.from_user.id
+        user_session = get_user_session(user_id)
 
-        if tool_running:
-            status_text = "🟢 <b>Tool đang chạy</b>\n\n"
-            if config:
-                elapsed = time.time() - config.start_time
+        if is_user_tool_running(user_id):
+            status_text = f"🟢 <b>Tool đang chạy (User: {user_id})</b>\n\n"
+            if user_session['config']:
+                elapsed = time.time() - user_session['config'].start_time
                 hours, remainder = divmod(int(elapsed), 3600)
                 minutes, seconds = divmod(remainder, 60)
-                success_rate = (config.successful_requests / (config.successful_requests + config.failed_requests)) * 100 if (config.successful_requests + config.failed_requests) > 0 else 0
+                success_rate = (user_session['config'].successful_requests / (user_session['config'].successful_requests + user_session['config'].failed_requests)) * 100 if (user_session['config'].successful_requests + user_session['config'].failed_requests) > 0 else 0
 
                 status_text += f"⏱️ Runtime: <code>{hours:02d}:{minutes:02d}:{seconds:02d}</code>\n"
-                status_text += f"✅ Success: <code>{config.successful_requests}</code>\n"
-                status_text += f"❌ Failed: <code>{config.failed_requests}</code>\n"
+                status_text += f"✅ Success: <code>{user_session['config'].successful_requests}</code>\n"
+                status_text += f"❌ Failed: <code>{user_session['config'].failed_requests}</code>\n"
                 status_text += f"📊 Success Rate: <code>{success_rate:.1f}%</code>\n"
-                status_text += f"🎯 Target: <code>{config.TARGET_FRIEND_UID}</code>\n"
-                status_text += f"👤 Name: <code>{config.NAME_TOOL}</code>"
+                status_text += f"🎯 Target: <code>{user_session['config'].TARGET_FRIEND_UID}</code>\n"
+                status_text += f"👤 Name: <code>{user_session['config'].NAME_TOOL}</code>"
         else:
-            status_text = "🔴 <b>Tool đang dừng</b>"
+            status_text = f"🔴 <b>Tool đang dừng (User: {user_id})</b>"
 
         bot.reply_to(message, status_text, parse_mode='HTML')
 
@@ -890,45 +923,65 @@ def _rand_email_():
 def _rand_pw_():
     return 'zlocket' + _rand_str_(4)
 
-def load_proxies():
+def init_proxy_for_user(user_config):
+    """Khởi tạo proxy cho user cụ thể"""
+    proxies = load_proxies_for_user(user_config)
+    if not proxies:
+        user_config._print(f"{xColor.RED}[!] {xColor.YELLOW}Note: Please add proxies to continue running the tool.")
+        user_config._loader_("Shutting down system", 1)
+        return [], 0
+    random.shuffle(proxies)
+    user_config._loader_("Optimizing proxy rotation algorithm", 1)
+    proxy_queue = Queue()
+    for proxy in proxies:
+        proxy_queue.put(proxy)
+    num_threads = min(len(proxies), 50)  # Giới hạn threads
+    user_config._print(f"{xColor.GREEN}[+] {xColor.CYAN}Proxy system initialized with {xColor.WHITE}{num_threads} {xColor.CYAN}endpoints")
+    return proxy_queue, num_threads
+
+def load_proxies_for_user(user_config):
     proxies=[]
-    proxy_urls=config.PROXY_LIST
-    config._print(
+    proxy_urls=user_config.PROXY_LIST
+    user_config._print(
         f"{xColor.MAGENTA}{Style.BRIGHT}[*] {xColor.CYAN}Initializing proxy collection system...")
     try:
         with open('proxy.txt', 'r', encoding='utf-8') as f:
             file_proxies=[line.strip() for line in f if line.strip()]
-            config._print(
+            user_config._print(
                 f"{xColor.MAGENTA}[+] {xColor.GREEN}Found {xColor.WHITE}{len(file_proxies)} {xColor.GREEN}proxies in local storage (proxy.txt)")
-            config._loader_("Processing local proxies", 1)
+            user_config._loader_("Processing local proxies", 1)
             proxies.extend(file_proxies)
     except FileNotFoundError:
-        config._print(
+        user_config._print(
             f"{xColor.YELLOW}[!] {xColor.RED}No local proxy file detected, trying currently available proxies...")
     for url in proxy_urls:
         try:
-            config._print(
+            user_config._print(
                 f"{xColor.MAGENTA}[*] {xColor.CYAN}Fetching proxies from {xColor.WHITE}{url}")
-            config._loader_(f"Connecting to {url.split('/')[2]}", 1)
-            response=requests.get(url, timeout=config.request_timeout)
+            user_config._loader_(f"Connecting to {url.split('/')[2]}", 1)
+            response=requests.get(url, timeout=user_config.request_timeout)
             response.raise_for_status()
             url_proxies=[line.strip()
                            for line in response.text.splitlines() if line.strip()]
             proxies.extend(url_proxies)
-            config._print(
+            user_config._print(
                 f"{xColor.MAGENTA}[+] {xColor.GREEN}Harvested {xColor.WHITE}{len(url_proxies)} {xColor.GREEN}proxies from {url.split('/')[2]}")
         except requests.exceptions.RequestException as e:
-            config._print(
+            user_config._print(
                 f"{xColor.RED}[!] {xColor.YELLOW}Connection failed: {url.split('/')[2]} - {str(e)}")
     proxies=list(set(proxies))
     if not proxies:
-        config._print(
+        user_config._print(
             f"{xColor.RED}[!] Warning: No proxies available for operation")
         return []
-    config.total_proxies=len(proxies)
-    config._print(
+    user_config.total_proxies=len(proxies)
+    user_config._print(
         f"{xColor.GREEN}[+] {xColor.CYAN}Proxy harvesting complete{xColor.WHITE} {len(proxies)} {xColor.CYAN}unique proxies loaded")
     return proxies
+
+def load_proxies():
+    """Deprecated function - use load_proxies_for_user instead"""
+    pass
 
 def init_proxy():
     proxies = load_proxies()
@@ -1075,6 +1128,219 @@ def step3_send_friend_request(id_token, thread_id, proxies_dict):
         f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Friend{Style.RESET_ALL}] {xColor.RED}[✗] Connection failed")
     return False
 
+def step1_create_account_for_user(thread_id, proxy_queue, stop_event, user_config):
+    """Tạo account cho user cụ thể"""
+    while not stop_event.is_set():
+        current_proxy=get_proxy(proxy_queue, thread_id, stop_event)
+        proxies_dict=format_proxy(current_proxy)
+        proxy_usage_count=0
+        failed_attempts=0
+        max_failed_attempts=10
+        if not current_proxy or stop_event.is_set():
+            user_config._print(
+                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.RED}[!] Thread stopping...")
+            break
+        user_config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.GREEN}● Thread activated with proxy: {xColor.YELLOW}{current_proxy}")
+
+        while not stop_event.is_set() and proxy_usage_count < user_config.ACCOUNTS_PER_PROXY and failed_attempts < max_failed_attempts:
+            if stop_event.is_set():
+                return
+            if not current_proxy:
+                current_proxy=get_proxy(proxy_queue, thread_id, stop_event)
+                proxies_dict=format_proxy(current_proxy)
+                if not current_proxy:
+                    user_config._print(
+                        f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.RED}[!] Proxy unavailable, will try again")
+                    break
+                user_config._print(
+                    f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.GREEN}● Switching to new proxy: {xColor.YELLOW}{current_proxy}")
+
+            prefix=f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Register{Style.RESET_ALL}]"
+            email=_rand_email_()
+            password=_rand_pw_()
+            user_config._print(
+                f"{prefix} {xColor.CYAN}● Initializing new identity: {xColor.YELLOW}{email[:8]}...@...")
+            payload={
+                "data": {
+                    "email": email,
+                    "password": password,
+                    "client_email_verif": True,
+                    "client_token": _rand_str_(40, chars=string.hexdigits.lower()),
+                    "platform": "ios"
+                }
+            }
+            if stop_event.is_set():
+                return
+            response_data=user_config.excute(
+                f"{user_config.API_BASE_URL}/createAccountWithEmailPassword",
+                headers=user_config.headers_locket(),
+                payload=payload,
+                thread_id=thread_id,
+                step="Register",
+                proxies_dict=proxies_dict
+            )
+            if stop_event.is_set():
+                return
+            if response_data == "proxy_dead":
+                user_config._print(
+                    f"{prefix} {xColor.RED}[!] Proxy terminated, acquiring new endpoint")
+                current_proxy=None
+                failed_attempts+=1
+                continue
+            if response_data == "too_many_requests":
+                user_config._print(
+                    f"{prefix} {xColor.RED}[!] Connection throttled, switching endpoint")
+                current_proxy=None
+                failed_attempts+=1
+                continue
+            if isinstance(response_data, dict) and response_data.get('result', {}).get('status') == 200:
+                user_config._print(
+                    f"{prefix} {xColor.GREEN}[✓] Identity created: {xColor.YELLOW}{email}")
+                proxy_usage_count+=1
+                failed_attempts=0
+                if stop_event.is_set():
+                    return
+                id_token=step1b_sign_in_for_user(
+                    email, password, thread_id, proxies_dict, user_config)
+                if stop_event.is_set():
+                    return
+                if id_token:
+                    if step2_finalize_user_for_user(id_token, thread_id, proxies_dict, user_config):
+                        if stop_event.is_set():
+                            return
+                        first_request_success=step3_send_friend_request_for_user(
+                            id_token, thread_id, proxies_dict, user_config)
+                        if first_request_success:
+                            user_config._print(
+                                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Boost{Style.RESET_ALL}] {xColor.YELLOW}🚀 Boosting friend requests: Sending 50 more requests")
+                            for _ in range(50):
+                                if stop_event.is_set():
+                                    return
+                                step3_send_friend_request_for_user(
+                                    id_token, thread_id, proxies_dict, user_config)
+                            user_config._print(
+                                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Boost{Style.RESET_ALL}] {xColor.GREEN}[✓] Boost complete: 101 total requests sent")
+                    else:
+                        user_config._print(
+                            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Auth{Style.RESET_ALL}] {xColor.RED}[✗] Authentication failure")
+                else:
+                    user_config._print(
+                        f"{prefix} {xColor.RED}[✗] Identity creation failed")
+                failed_attempts+=1
+        if failed_attempts >= max_failed_attempts:
+            user_config._print(
+                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.RED}[!] Thread restarting: Excessive failures ({failed_attempts})")
+        else:
+            user_config._print(
+                f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL}] {xColor.YELLOW}● Proxy limit reached ({proxy_usage_count}/{user_config.ACCOUNTS_PER_PROXY}), getting new proxy")
+
+def step1b_sign_in_for_user(email, password, thread_id, proxies_dict, user_config):
+    if not email or not password:
+        user_config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Auth{Style.RESET_ALL}] {xColor.RED}[✗] Authentication failed: Invalid credentials")
+        return None
+    payload={
+        "email": email,
+        "password": password,
+        "clientType": "CLIENT_TYPE_IOS",
+        "returnSecureToken": True
+    }
+    vtd=user_config.excute(
+        f"{user_config.FIREBASE_AUTH_URL}/verifyPassword?key={user_config.FIREBASE_API_KEY}",
+        headers=user_config.firebase_headers_locket(),
+        payload=payload,
+        thread_id=thread_id,
+        step="Auth",
+        proxies_dict=proxies_dict
+    )
+    if vtd and 'idToken' in vtd:
+        user_config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Auth{Style.RESET_ALL}] {xColor.GREEN}[✓] Authentication successful")
+        return vtd.get('idToken')
+    user_config._print(
+        f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Auth{Style.RESET_ALL}] {xColor.RED}[✗] Authentication failed")
+    return None
+
+def step2_finalize_user_for_user(id_token, thread_id, proxies_dict, user_config):
+    if not id_token:
+        user_config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Profile{Style.RESET_ALL}] {xColor.RED}[✗] Profile creation failed: Invalid token")
+        return False
+    first_name=user_config.NAME_TOOL
+    last_name=' '.join(random.sample([
+        '😀', '😂', '😍', '🥰', '😊', '😇', '😚', '😘', '😻', '😽', '🤗',
+        '😎', '🥳', '😜', '🤩', '😢', '😡', '😴', '🙈', '🙌', '💖', '🔥', '👍',
+        '✨', '🌟', '🍎', '🍕', '🚀', '🎉', '🎈', '🌈', '🐶', '🐱', '🦁',
+        '😋', '😬', '😳', '😷', '🤓', '😈', '👻', '💪', '👏', '🙏', '💕', '💔',
+        '🌹', '🍒', '🍉', '🍔', '🍟', '☕', '🍷', '🎂', '🎁', '🎄', '🎃', '🔔',
+        '⚡', '💡', '📚', '✈️', '🚗', '🏠', '⛰️', '🌊', '☀️', '☁️', '❄️', '🌙',
+        '🐻', '🐼', '🐸', '🐝', '🦄', '🐙', '🦋', '🌸', '🌺', '🌴', '🏀', '⚽', '🎸'
+    ], 5))
+    username=_rand_name_()
+    payload={
+        "data": {
+            "username": username,
+            "last_name": last_name,
+            "require_username": True,
+            "first_name": first_name
+        }
+    }
+    headers=user_config.headers_locket()
+    headers['Authorization']=f"Bearer {id_token}"
+    result=user_config.excute(
+        f"{user_config.API_BASE_URL}/finalizeTemporaryUser",
+        headers=headers,
+        payload=payload,
+        thread_id=thread_id,
+        step="Profile",
+        proxies_dict=proxies_dict
+    )
+    if result:
+        user_config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Profile{Style.RESET_ALL}] {xColor.GREEN}[✓] Profile created: {xColor.YELLOW}{username}")
+        return True
+    user_config._print(
+        f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Profile{Style.RESET_ALL}] {xColor.RED}[✗] Profile creation failed")
+    return False
+
+def step3_send_friend_request_for_user(id_token, thread_id, proxies_dict, user_config):
+    if not id_token:
+        user_config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Friend{Style.RESET_ALL}] {xColor.RED}[✗] Connection failed: Invalid token")
+        return False
+    payload={
+        "data": {
+            "user_uid": user_config.TARGET_FRIEND_UID,
+            "source": "signUp",
+            "platform": "iOS",
+            "messenger": "Messages",
+            "invite_variant": {"value": "1002", "@type": "type.googleapis.com/google.protobuf.Int64Value"},
+            "share_history_eligible": True,
+            "rollcall": False,
+            "prompted_reengagement": False,
+            "create_ofr_for_temp_users": False,
+            "get_reengagement_status": False
+        }
+    }
+    headers=user_config.headers_locket()
+    headers['Authorization']=f"Bearer {id_token}"
+    result=user_config.excute(
+        f"{user_config.API_BASE_URL}/sendFriendRequest",
+        headers=headers,
+        payload=payload,
+        thread_id=thread_id,
+        step="Friend",
+        proxies_dict=proxies_dict
+    )
+    if result:
+        user_config._print(
+            f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Friend{Style.RESET_ALL}] {xColor.GREEN}[✓] Connection established with target")
+        return True
+    user_config._print(
+        f"[{xColor.CYAN}Thread-{thread_id:03d}{Style.RESET_ALL} | {xColor.MAGENTA}Friend{Style.RESET_ALL}] {xColor.RED}[✗] Connection failed")
+    return False
+
 def step1_create_account(thread_id, proxy_queue, stop_event):
     while not stop_event.is_set() and tool_running:
         current_proxy=get_proxy(proxy_queue, thread_id, stop_event)
@@ -1185,7 +1451,6 @@ if __name__ == "__main__":
     # Đặt Bot Token của bạn ở đây
     BOT_TOKEN = "7602313290:AAHCNTscx1x7AehwYpBX0vxOOBE3HMeYkCE"
 
-    config = zLocket()
     bot = telebot.TeleBot(BOT_TOKEN)
 
     # Setup bot handlers after bot initialization
