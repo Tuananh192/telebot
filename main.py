@@ -1449,7 +1449,7 @@ def step1_create_account(thread_id, proxy_queue, stop_event):
 
 if __name__ == "__main__":
     # Đặt Bot Token của bạn ở đây
-    BOT_TOKEN = "7602313290:AAHCNTscx1x7AehwYpBX0vxOOBE3HMeYkCE"
+    BOT_TOKEN = "5600172882:AAGpX4dvXFepYAtDoOcEgTF-ce1Ce0E3V9U"
 
     bot = telebot.TeleBot(BOT_TOKEN)
 
