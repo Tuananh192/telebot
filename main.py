@@ -94,7 +94,14 @@ user_sessions = {}  # Lưu session của từng user: {user_id: {tool_running, t
 user_states = {}  # Lưu trạng thái của từng user
 session_lock = threading.Lock()  # Lock để đảm bảo thread-safe khi thao tác với user_sessions
 
+# Admin configuration
+ADMIN_IDS = [6913983524, 1615483759]  # Thay bằng user ID của admin
+
 # Helper functions for user session management
+def is_admin(user_id):
+    """Kiểm tra xem user có phải admin không"""
+    return user_id in ADMIN_IDS
+
 def get_user_session(user_id):
     """Lấy session của user, tạo mới nếu chưa có"""
     with session_lock:
@@ -866,9 +873,172 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 
         bot.reply_to(message, status_text, parse_mode='HTML')
 
+    @bot.message_handler(commands=['admin'])
+    def admin_command(message):
+        user_id = message.from_user.id
+        
+        if not is_admin(user_id):
+            bot.reply_to(message, "❌ Bạn không có quyền sử dụng lệnh này!")
+            return
+        
+        # Thống kê người dùng
+        with session_lock:
+            total_users = len(user_sessions)
+            active_users = sum(1 for session in user_sessions.values() if session['tool_running'])
+            users_with_config = sum(1 for session in user_sessions.values() if session['config'] is not None)
+            
+            # Thống kê theo thời gian (users có hoạt động trong 24h qua)
+            current_time = time.time()
+            recent_users = sum(1 for session in user_sessions.values() if current_time - session['last_spam_time'] <= 86400 and session['last_spam_time'] > 0)
+        
+        # Thống kê tổng requests (từ tất cả users active)
+        total_success = 0
+        total_failed = 0
+        for session in user_sessions.values():
+            if session['config']:
+                total_success += session['config'].successful_requests
+                total_failed += session['config'].failed_requests
+        
+        admin_text = f"""
+🔧 <b>ADMIN PANEL - Bot Statistics</b>
+
+👥 <b>User Statistics:</b>
+• Total Users: <code>{total_users}</code>
+• Active Users: <code>{active_users}</code> (đang chạy tool)
+• Users with Config: <code>{users_with_config}</code>
+• Recent Users (24h): <code>{recent_users}</code>
+
+📊 <b>Request Statistics:</b>
+• Total Success: <code>{total_success}</code>
+• Total Failed: <code>{total_failed}</code>
+• Success Rate: <code>{(total_success/(total_success+total_failed)*100) if (total_success+total_failed) > 0 else 0:.1f}%</code>
+
+🕒 <b>Uptime:</b>
+Bot started at: <code>{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</code>
+
+<b>Admin Commands:</b>
+• <code>/admin</code> - Xem thống kê
+• <code>/broadcast [message]</code> - Gửi tin nhắn tới tất cả users
+• <code>/userlist</code> - Xem danh sách user IDs
+"""
+        
+        markup = types.InlineKeyboardMarkup()
+        markup.row(
+            types.InlineKeyboardButton("🔄 Refresh", callback_data="admin_refresh"),
+            types.InlineKeyboardButton("👥 User List", callback_data="admin_userlist")
+        )
+        markup.row(
+            types.InlineKeyboardButton("📢 Broadcast", callback_data="admin_broadcast")
+        )
+        
+        bot.reply_to(message, admin_text, parse_mode='HTML', reply_markup=markup)
+
+    @bot.message_handler(commands=['broadcast'])
+    def broadcast_command(message):
+        user_id = message.from_user.id
+        
+        if not is_admin(user_id):
+            bot.reply_to(message, "❌ Bạn không có quyền sử dụng lệnh này!")
+            return
+        
+        args = message.text.split(maxsplit=1)
+        if len(args) < 2:
+            bot.reply_to(message, "❌ Thiếu nội dung tin nhắn!\n\nSử dụng: /broadcast [message]")
+            return
+        
+        broadcast_message = args[1]
+        
+        # Gửi tin nhắn tới tất cả users đã từng sử dụng bot
+        success_count = 0
+        error_count = 0
+        
+        with session_lock:
+            user_ids = list(user_sessions.keys())
+        
+        bot.reply_to(message, f"📢 Đang gửi broadcast tới {len(user_ids)} users...")
+        
+        for target_user_id in user_ids:
+            try:
+                bot.send_message(target_user_id, f"📢 <b>Thông báo từ Admin:</b>\n\n{broadcast_message}", parse_mode='HTML')
+                success_count += 1
+            except Exception as e:
+                error_count += 1
+        
+        result_text = f"✅ Broadcast hoàn thành!\n\n📤 Gửi thành công: {success_count}\n❌ Gửi thất bại: {error_count}"
+        bot.send_message(message.chat.id, result_text)
+
+    @bot.message_handler(commands=['userlist'])
+    def userlist_command(message):
+        user_id = message.from_user.id
+        
+        if not is_admin(user_id):
+            bot.reply_to(message, "❌ Bạn không có quyền sử dụng lệnh này!")
+            return
+        
+        with session_lock:
+            if not user_sessions:
+                bot.reply_to(message, "📝 Chưa có user nào sử dụng bot.")
+                return
+            
+            user_list = []
+            for uid, session in user_sessions.items():
+                status = "🟢" if session['tool_running'] else "🔴"
+                last_spam = session.get('last_spam_time', 0)
+                if last_spam > 0:
+                    last_time = datetime.datetime.fromtimestamp(last_spam).strftime('%m-%d %H:%M')
+                else:
+                    last_time = "Never"
+                user_list.append(f"{status} <code>{uid}</code> | Last: {last_time}")
+        
+        # Chia nhỏ danh sách nếu quá dài
+        chunk_size = 20
+        for i in range(0, len(user_list), chunk_size):
+            chunk = user_list[i:i+chunk_size]
+            userlist_text = f"👥 <b>User List ({i+1}-{min(i+chunk_size, len(user_list))}/{len(user_list)}):</b>\n\n"
+            userlist_text += "\n".join(chunk)
+            bot.send_message(message.chat.id, userlist_text, parse_mode='HTML')
+
     @bot.message_handler(commands=['help'])
     def help_command(message):
-        help_text = """
+        user_id = message.from_user.id
+        
+        if is_admin(user_id):
+            help_text = """
+<b>🔒 zLocket Spam BIGCHANG - Hướng dẫn sử dụng</b>
+
+<b>Các lệnh chính:</b>
+• <code>/start</code> - Menu chính
+• <code>/spam [target]</code> - Bắt đầu spam
+• <code>/stop</code> - Dừng spam
+• <code>/status</code> - Kiểm tra trạng thái
+• <code>/help</code> - Hướng dẫn này
+
+<b>🔧 Lệnh Admin:</b>
+• <code>/admin</code> - Xem thống kê bot
+• <code>/broadcast [message]</code> - Gửi thông báo
+• <code>/userlist</code> - Danh sách users
+
+<b>Cách sử dụng lệnh /spam:</b>
+<code>/spam username123</code>
+<code>/spam https://locket.cam/username123</code>
+
+<b>Quy trình spam:</b>
+1. Gửi lệnh <code>/spam [target]</code>
+2. Bot sẽ yêu cầu nhập tên tùy ý
+3. Nhập tên hoặc gửi "default" để dùng tên mặc định
+4. Tool sẽ chạy tối thiểu 30 giây
+
+<b>Lưu ý:</b>
+• Target có thể là username hoặc link đầy đủ
+• Custom name tối đa 30 ký tự
+• Cooldown 1 phút giữa các lần spam
+• Tool chạy tối thiểu 5 phút mỗi lần
+• Tool sẽ tự động random emoji
+
+<b>Liên hệ:</b> @BigChang19
+"""
+        else:
+            help_text = """
 <b>🔒 zLocket Spam BIGCHANG - Hướng dẫn sử dụng</b>
 
 <b>Các lệnh chính:</b>
@@ -901,6 +1071,8 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
 
     @bot.callback_query_handler(func=lambda call: True)
     def callback_query(call):
+        user_id = call.from_user.id
+        
         if call.data == "start_spam":
             bot.send_message(call.message.chat.id, "🚀 Để bắt đầu spam, sử dụng lệnh:\n\n<code>/spam [target]</code>\n\nVí dụ:\n<code>/spam username123</code>\n\nBot sẽ hỏi tên tùy ý sau đó!", parse_mode='HTML')
         elif call.data == "stop_spam":
@@ -909,6 +1081,12 @@ Chào mừng! Đây là bot điều khiển tool zLocket.
             status_command(call.message)
         elif call.data == "help":
             help_command(call.message)
+        elif call.data == "admin_refresh" and is_admin(user_id):
+            admin_command(call.message)
+        elif call.data == "admin_userlist" and is_admin(user_id):
+            userlist_command(call.message)
+        elif call.data == "admin_broadcast" and is_admin(user_id):
+            bot.send_message(call.message.chat.id, "📢 Để gửi broadcast, sử dụng lệnh:\n\n<code>/broadcast [nội dung tin nhắn]</code>\n\nVí dụ:\n<code>/broadcast Chào mừng các bạn sử dụng bot!</code>", parse_mode='HTML')
 
 # Helper functions (giữ nguyên từ code cũ)
 def _rand_str_(length=10, chars=string.ascii_lowercase + string.digits):
@@ -1449,21 +1627,107 @@ def step1_create_account(thread_id, proxy_queue, stop_event):
 
 if __name__ == "__main__":
     # Đặt Bot Token của bạn ở đây
-    BOT_TOKEN = "5600172882:AAGpX4dvXFepYAtDoOcEgTF-ce1Ce0E3V9U"
+    BOT_TOKEN = "7602313290:AAHsT87l1mlXNIW5FtHTe8oPTtf-kUPIQZY"
 
     bot = telebot.TeleBot(BOT_TOKEN)
 
     # Setup bot handlers after bot initialization
     setup_bot_handlers()
 
-    print(f"🤖 Bot đã khởi động! Token: {BOT_TOKEN[:10]}...")
-    print(f"📱 Gửi /start cho bot để bắt đầu sử dụng")
+    print(f"🤖 Bot đang khởi động...")
+    print(f"📱 Token: {BOT_TOKEN[:10]}...")
+    
+    # Test bot connection first
+    try:
+        bot_info = bot.get_me()
+        print(f"✅ Kết nối thành công! Bot: @{bot_info.username}")
+        print(f"📱 Gửi /start cho bot để bắt đầu sử dụng")
+    except telebot.apihelper.ApiTelegramException as e:
+        if "409" in str(e):
+            print("❌ CẢNH BÁO: Có instance khác của bot đang chạy!")
+            print("⛔ Dừng bot này để tránh xung đột...")
+            sys.exit(1)
+        else:
+            print(f"❌ Lỗi kết nối bot: {e}")
+            sys.exit(1)
 
     try:
-        bot.polling(none_stop=True)
+        # First, try to clear any existing webhooks
+        try:
+            bot.remove_webhook()
+            print("🔄 Đã xóa webhook cũ (nếu có)")
+            time.sleep(2)  # Wait a bit before starting polling
+        except Exception:
+            pass
+        
+        # Try to stop any existing polling
+        try:
+            bot.stop_polling()
+            time.sleep(2)
+        except Exception:
+            pass
+            
+        print("🚀 Đang bắt đầu polling...")
+        bot.polling(none_stop=True, restart_on_change=False, timeout=30, long_polling_timeout=20)
+        
+    except telebot.apihelper.ApiTelegramException as e:
+        if "409" in str(e) or "Conflict" in str(e):
+            print("\n❌ Lỗi 409: Có bot instance khác đang chạy!")
+            print("🔄 Đang thử khởi động lại sau 30 giây...")
+            time.sleep(30)
+            
+            # Try one more time with webhook approach
+            try:
+                print("🔄 Thử sử dụng webhook thay vì polling...")
+                bot.remove_webhook()
+                time.sleep(3)
+                
+                # Use webhook for deployment environment
+                from flask import Flask, request
+                app = Flask(__name__)
+                
+                @app.route(f"/{BOT_TOKEN}", methods=['POST'])
+                def webhook():
+                    json_str = request.get_data().decode('UTF-8')
+                    update = telebot.types.Update.de_json(json_str)
+                    bot.process_new_updates([update])
+                    return '', 200
+                
+                @app.route('/')
+                def index():
+                    return "Bot is running!"
+                
+                # Set webhook
+                webhook_url = f"https://{os.environ.get('REPL_SLUG', 'your-repl')}-{os.environ.get('REPL_OWNER', 'your-username')}.replit.app/{BOT_TOKEN}"
+                bot.set_webhook(url=webhook_url)
+                print(f"✅ Webhook đã được thiết lập: {webhook_url}")
+                
+                app.run(host='0.0.0.0', port=5000, debug=False)
+                
+            except Exception as webhook_error:
+                print(f"❌ Lỗi webhook: {webhook_error}")
+                print("💡 Giải pháp:")
+                print("   1. Đợi 2-3 phút rồi restart repl")
+                print("   2. Hoặc sử dụng token bot khác")
+                print("   3. Kiểm tra xem có repl nào khác đang chạy bot này không")
+        else:
+            print(f"\n❌ Lỗi bot: {e}")
+            print("🔄 Thử lại sau 10 giây...")
+            time.sleep(10)
+            
     except KeyboardInterrupt:
         print("\n⛔ Bot đã dừng!")
-        if tool_running:
-            tool_running = False
-            if stop_event:
-                stop_event.set()
+        # Cleanup user sessions
+        for user_id in list(user_sessions.keys()):
+            user_session = user_sessions[user_id]
+            if user_session.get('tool_running'):
+                user_session['tool_running'] = False
+                if user_session.get('stop_event'):
+                    user_session['stop_event'].set()
+                    
+    except Exception as e:
+        print(f"\n❌ Lỗi không xác định: {e}")
+        print("🔄 Sẽ thử khởi động lại...")
+        
+    finally:
+        print("🔄 Bot đã thoát hoàn toàn")
